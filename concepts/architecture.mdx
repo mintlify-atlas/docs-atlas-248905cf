@@ -1,0 +1,151 @@
+---
+title: Architecture
+description: How Llama Stack is structured internally — packages, request flow, provider types, and auto-routing.
+---
+
+Llama Stack is a server that exposes a unified, OpenAI-compatible API for AI capabilities: inference, safety, vector storage, agents, evaluation, and more. It is provider-agnostic — the same API works whether the backend is Ollama, OpenAI, vLLM, Bedrock, or dozens of other services.
+
+## Two packages
+
+The codebase is split into two separate pip packages:
+
+| Package | Purpose |
+|---------|---------|
+| **`llama-stack-api`** | Lightweight package with API protocol definitions (Python `Protocol` classes), Pydantic data types, and provider spec types. No server code. Third-party providers depend only on this. |
+| **`llama-stack`** | The server implementation: provider resolution, routing, storage, CLI, and all built-in providers. |
+
+A third optional package, **`llama-stack-ui`**, provides a web UI for the chat playground and admin panel. It is built with Next.js and runs independently of the server.
+
+<Tip>
+If you are building a custom provider, you only need to depend on `llama-stack-api`. This keeps your provider lightweight and decoupled from the full server.
+</Tip>
+
+## Request flow
+
+Every request travels through the same pipeline:
+
+```text
+Client (llama-stack-client SDK or raw HTTP)
+  |
+  v
+FastAPI Server  (src/llama_stack/core/server/server.py)
+  |
+  |-- AuthenticationMiddleware  (token validation, user extraction)
+  |-- QuotaMiddleware           (rate limiting per client)
+  |
+  v
+Route Dispatch
+  |
+  |-- FastAPI Router routes     (auto-discovered via fastapi_router_registry.py)
+  |
+  v
+Router  (src/llama_stack/core/routers/)
+  |
+  |-- Looks up the resource (model, shield, etc.) in the RoutingTable
+  |-- Resolves which provider handles this resource
+  |-- Enforces access control policies
+  |
+  v
+Provider Implementation
+  |
+  |-- Inline provider (runs in-process, e.g. sentence-transformers, faiss)
+  |-- Remote provider (calls external service, e.g. ollama, openai, fireworks)
+  |
+  v
+External Service or Local Computation
+```
+
+### Example: chat completion
+
+<Steps>
+  <Step title="Client sends the request">
+    The client sends `POST /v1/chat/completions` with `model: "ollama/llama3.2:3b-instruct-fp16"`.
+  </Step>
+  <Step title="FastAPI dispatches to the inference router">
+    The server routes the request to the `InferenceRouter` in `core/routers/inference.py`.
+  </Step>
+  <Step title="Router looks up the model">
+    `InferenceRouter` calls `routing_table.get_provider_impl("ollama/llama3.2:3b-instruct-fp16")`. The `CommonRoutingTableImpl` queries the `DistributionRegistry` and finds the model belongs to the `ollama` provider.
+  </Step>
+  <Step title="Router delegates to the provider">
+    The router calls the Ollama provider's `openai_chat_completion()` method.
+  </Step>
+  <Step title="Provider forwards to the backend">
+    The Ollama provider creates an `AsyncOpenAI` client pointing at the Ollama server and forwards the request. The response streams back through the router to the client as SSE events.
+  </Step>
+</Steps>
+
+## Provider types
+
+Providers come in two types, identified by a prefix in their `provider_type` string:
+
+| Type | Prefix | How it works | Examples |
+|------|--------|-------------|---------|
+| **Inline** | `inline::` | Runs entirely inside the Llama Stack process | `inline::faiss`, `inline::sentence-transformers`, `inline::llama-guard` |
+| **Remote** | `remote::` | Adapts an external service via a thin client | `remote::ollama`, `remote::openai`, `remote::vllm`, `remote::bedrock` |
+
+Each provider spec declares:
+
+- `api` — which API it implements (e.g., `Api.inference`)
+- `provider_type` — unique identifier like `"remote::openai"`
+- `module` — Python module containing the factory function
+- `config_class` — Pydantic config model for the provider
+- `pip_packages` — additional dependencies needed at runtime
+
+Llama Stack includes at least one inline provider for each API, so you can run a complete stack locally with no external dependencies.
+
+## Auto-routing
+
+Many APIs use automatic routing so multiple providers can serve different resources through the same endpoint. At startup, `resolve_impls()` in `core/resolver.py` creates a `RoutingTable` + `Router` pair for each auto-routed API.
+
+The routing table tracks which provider owns which resource. The router consults the table on each request and delegates to the correct provider.
+
+| Routing table (`Api.*`) | Router (`Api.*`) | What is routed |
+|------------------------|-----------------|----------------|
+| `models` | `inference` | Route inference calls to the correct provider per model |
+| `shields` | `safety` | Route safety checks to the correct provider per shield |
+| `vector_stores` | `vector_io` | Route vector store operations to the correct provider |
+| `datasets` | `datasetio` | Route dataset operations to the correct provider |
+| `scoring_functions` | `scoring` | Route scoring calls to the correct provider |
+| `benchmarks` | `eval` | Route evaluation calls to the correct provider |
+| `tool_groups` | `tool_runtime` | Route tool calls to the correct tool runtime provider |
+
+This means you can have Ollama serving one model and OpenAI serving another — both accessible through the same `/v1/chat/completions` endpoint with the same client code.
+
+## The `llama-stack-api` package
+
+The `llama_stack_api` package defines all public-facing types and protocols:
+
+- **Protocols** — Python `Protocol` classes like `Inference` and `Safety` that define the API contract. HTTP routes are defined via FastAPI routers in `fastapi_routes.py` modules.
+- **Data types** — Pydantic models for requests, responses, and resources (e.g., `Model`, `Shield`, `ChatCompletionRequest`).
+- **Provider specs** — `InlineProviderSpec`, `RemoteProviderSpec`, and related types that describe how providers are declared.
+- **Internal utilities** — `KVStore` and `SqlStore` abstract interfaces that third-party providers can use without depending on the full server.
+
+Provider implementations import from `llama_stack_api` for type definitions and from `llama_stack.providers.utils` for shared utilities.
+
+## Storage
+
+Llama Stack persists state — registered resources, conversation history, vector stores — using pluggable storage backends configured in the `storage` section of the run config.
+
+<AccordionGroup>
+  <Accordion title="KVStore backends">
+    Used for the distribution registry, quota tracking, and provider state.
+
+    | Backend | Config class | Use case |
+    |---------|-------------|---------|
+    | SQLite | `SqliteKVStoreConfig` | Default, single-node development |
+    | Redis | `RedisKVStoreConfig` | Multi-node, caching |
+    | PostgreSQL | `PostgresKVStoreConfig` | Production deployments |
+    | MongoDB | `MongoDBKVStoreConfig` | Document-oriented workloads |
+  </Accordion>
+  <Accordion title="SqlStore backends">
+    Used for inference store (chat completion logs), conversations, and prompts.
+
+    | Backend | Config class | Use case |
+    |---------|-------------|---------|
+    | SQLite | `SqliteSqlStoreConfig` | Default, single-node development |
+    | PostgreSQL | `PostgresSqlStoreConfig` | Production deployments |
+  </Accordion>
+</AccordionGroup>
+
+The `DistributionRegistry` in `src/llama_stack/core/store/` persists all registered resources to the configured KVStore so they survive server restarts.

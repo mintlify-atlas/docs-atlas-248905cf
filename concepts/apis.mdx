@@ -1,0 +1,149 @@
+---
+title: APIs
+description: The full set of APIs exposed by Llama Stack, their stability levels, and how they work together.
+---
+
+Llama Stack exposes a set of OpenAI-compatible REST APIs. Each API is backed by one or more [providers](/concepts/distributions) and can be enabled or disabled in the distribution config.
+
+## Stability levels
+
+APIs are versioned by maturity under their URL prefix. The stability level tells you what guarantees the API makes between releases.
+
+<AccordionGroup>
+  <Accordion title="v1alpha — experimental">
+    Little to no expectation of support between versions. Breaking changes are permitted: datatypes, parameters, and routes can all change. Use for exploration only, not production code.
+
+    An API graduates from `v1alpha` to `v1beta` when the team has identified the required routes and the shape of their parameters and return types.
+  </Accordion>
+  <Accordion title="v1beta — stabilizing">
+    Routes remain consistent between versions. Parameters and return types may still change, but changes should be minor. CRUD operations must stay stable once an API reaches `v1beta`.
+
+    An API graduates from `v1beta` to `v1` when all mandatory parameters and return types are finalized and complete.
+  </Accordion>
+  <Accordion title="v1 — stable">
+    Considered stable. Backward-compatible between patch releases (Z-streams). Datatypes for a route and its return types cannot change in a patch release. Breaking changes in minor releases (Y-streams) require maintainer approval, a `breaking-change` PR label, and a release announcement.
+
+    Stable APIs must have conformance tests.
+  </Accordion>
+  <Accordion title="v2+ — major versions">
+    Introducing a new major version like `/v2` is a last resort for changes to a stable `/v1` API that are fundamentally backward-incompatible. A new major version must follow the same `v2alpha` → `v2beta` → `v2` lifecycle, run in parallel with the `/v1` API, and come with a published deprecation timeline for `/v1`.
+  </Accordion>
+  <Accordion title="Deprecated">
+    APIs marked `deprecated: true` in the OpenAPI spec are no longer actively maintained and will be removed in a future release.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+API stability is independent of provider stability. A provider can iterate freely as long as it stays within the bounds of its API contract. If a provider needs to change the API itself, the API must not be at `/v1`, or the change must go through the breaking-change process.
+</Note>
+
+## Available APIs
+
+<CardGroup cols={2}>
+  <Card title="inference" icon="brain">
+    Chat completions, text completions, and embeddings. The primary API for interacting with language models. Backed by the `models` routing table — each model is served by its own provider.
+
+    Key endpoints: `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`
+  </Card>
+  <Card title="responses" icon="message">
+    OpenAI Responses API. Stateful, multi-turn conversations with server-side tool orchestration. The model decides which tools to call; Llama Stack executes them and feeds results back automatically.
+
+    Key endpoint: `/v1/responses`
+  </Card>
+  <Card title="safety" icon="shield">
+    Shield-based content moderation. Run requests and responses through configurable safety providers (e.g., Llama Guard, NVIDIA Guardrails). Backed by the `shields` routing table.
+
+    Key endpoint: `/v1/safety/run-shield`
+  </Card>
+  <Card title="agents" icon="robot">
+    Agentic loop execution. Manages sessions, turns, and tool calls for long-running agent workflows. Depends on inference, safety, vector\_io, and tool\_runtime.
+
+    Key endpoints: `/v1/agents`, `/v1/agents/{agent_id}/sessions`
+  </Card>
+  <Card title="vector_io" icon="database">
+    Vector store operations: insert chunks, query by similarity. Backed by the `vector_stores` routing table so different stores can be served by different providers (FAISS, pgvector, Chroma, etc.).
+
+    Key endpoints: `/v1/vector-io/insert`, `/v1/vector-io/query`
+  </Card>
+  <Card title="datasetio" icon="table">
+    Dataset read and write operations. Backed by the `datasets` routing table.
+
+    Key endpoints: `/v1/datasetio/rows`, `/v1/datasetio/rows/append`
+  </Card>
+  <Card title="eval" icon="chart-line">
+    Model evaluation: run benchmarks and score model outputs. Backed by the `benchmarks` routing table. Depends on inference, datasetio, and scoring.
+
+    Key endpoints: `/v1/eval/benchmarks/{benchmark_id}/jobs`
+  </Card>
+  <Card title="scoring" icon="star">
+    Score model outputs using scoring functions (LLM-as-judge, regex-based, equality, etc.). Backed by the `scoring_functions` routing table.
+
+    Key endpoints: `/v1/scoring/score`, `/v1/scoring/score-batch`
+  </Card>
+  <Card title="tool_runtime" icon="wrench">
+    Execute tools on behalf of the model: `file_search`, `web_search`, MCP servers, and custom function tools. Backed by the `tool_groups` routing table.
+
+    Key endpoint: `/v1/tool-runtime/invoke`
+  </Card>
+  <Card title="files" icon="file">
+    Upload and manage files. Integrates with vector stores: upload a document, attach it to a vector store, and Llama Stack automatically chunks, embeds, and indexes it.
+
+    Key endpoints: `/v1/files`, `/v1/files/{file_id}`
+  </Card>
+  <Card title="batches" icon="layer-group">
+    Batch inference jobs. Submit large sets of requests and retrieve results asynchronously.
+
+    Key endpoints: `/v1/batch-inference/chat-completion`
+  </Card>
+  <Card title="post_training" icon="graduation-cap">
+    Fine-tuning and supervised training jobs. Currently under active development (`v1alpha`).
+
+    Key endpoints: `/v1alpha/post-training/supervised-fine-tune`
+  </Card>
+</CardGroup>
+
+## How the APIs work together
+
+### RAG with files, vector stores, and responses
+
+These three APIs combine to give you retrieval-augmented generation in a few calls:
+
+<Steps>
+  <Step title="Upload a document">
+    ```python
+    file = client.files.create(file=open("report.pdf", "rb"), purpose="assistants")
+    ```
+  </Step>
+  <Step title="Create a vector store and attach the file">
+    ```python
+    vs = client.vector_stores.create(name="my-docs")
+    client.vector_stores.files.create(vector_store_id=vs.id, file_id=file.id)
+    ```
+    Llama Stack automatically chunks, embeds, and indexes the document using the configured embedding model.
+  </Step>
+  <Step title="Search it in a responses request">
+    ```python
+    response = client.responses.create(
+        model="ollama/llama3.2:3b",
+        input="Summarize the Q3 findings",
+        tools=[{"type": "file_search", "vector_store_ids": [vs.id]}],
+    )
+    ```
+    The model calls the `file_search` tool, which queries the vector store and injects the retrieved chunks into the context.
+  </Step>
+</Steps>
+
+### Tool orchestration in responses
+
+The Responses API orchestrates tools server-side. Supported built-in tools:
+
+| Tool | What it does |
+|------|-------------|
+| `file_search` | Queries attached vector stores |
+| `web_search` | Queries configured web search providers |
+| `mcp` | Connects to any MCP (Model Context Protocol) server |
+| Custom functions | Your own function tools passed as definitions |
+
+### Provider mapping
+
+Not every provider supports every feature within an API. See the [Providers](/providers) section for a full matrix of which providers implement which APIs and features.

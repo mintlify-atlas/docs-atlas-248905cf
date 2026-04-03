@@ -1,0 +1,203 @@
+---
+title: Client libraries
+description: Connect to Llama Stack from Python, TypeScript, or any OpenAI-compatible client.
+---
+
+Llama Stack is OpenAI-compatible, so you can use any OpenAI SDK or HTTP client without additional dependencies. Dedicated SDKs are also available with Llama Stack-specific features.
+
+## Dedicated SDKs
+
+<CardGroup cols={2}>
+  <Card title="Python SDK" icon="python" href="https://github.com/meta-llama/llama-stack-client-python">
+    `llama-stack-client` — official Python client with full API coverage
+  </Card>
+  <Card title="TypeScript SDK" icon="js" href="https://github.com/meta-llama/llama-stack-client-typescript">
+    `llama-stack-client` — official TypeScript/Node.js client
+  </Card>
+</CardGroup>
+
+## Python
+
+### Install
+
+<CodeGroup>
+
+```bash pip
+pip install llama-stack-client
+```
+
+```bash uv
+uv add llama-stack-client
+```
+
+</CodeGroup>
+
+### Basic usage
+
+```python
+from llama_stack_client import LlamaStackClient
+
+client = LlamaStackClient(base_url="http://localhost:8321")
+
+# List available models
+models = client.models.list()
+for model in models:
+    print(model.identifier)
+
+# Chat completion
+response = client.inference.chat_completion(
+    model_id="llama3.2:3b",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What is Llama Stack?"},
+    ],
+)
+print(response.completion_message.content)
+```
+
+### Using the OpenAI SDK with Llama Stack
+
+Since Llama Stack is OpenAI-compatible, you can also use the standard `openai` package:
+
+```bash
+pip install openai
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+
+response = client.chat.completions.create(
+    model="llama3.2:3b",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(response.choices[0].message.content)
+```
+
+<Note>
+  The `api_key="fake"` value is required by the OpenAI SDK but is not validated by Llama Stack unless you configure authentication. Set it to any non-empty string.
+</Note>
+
+## TypeScript
+
+### Install
+
+<CodeGroup>
+
+```bash npm
+npm install llama-stack-client
+```
+
+```bash yarn
+yarn add llama-stack-client
+```
+
+```bash pnpm
+pnpm add llama-stack-client
+```
+
+</CodeGroup>
+
+### Basic usage
+
+```typescript
+import LlamaStackClient from "llama-stack-client";
+
+const client = new LlamaStackClient({ baseURL: "http://localhost:8321" });
+
+// List available models
+const models = await client.models.list();
+for (const model of models) {
+  console.log(model.identifier);
+}
+
+// Chat completion
+const response = await client.inference.chatCompletion({
+  model_id: "llama3.2:3b",
+  messages: [
+    { role: "system", content: "You are a helpful assistant." },
+    { role: "user", content: "What is Llama Stack?" },
+  ],
+});
+console.log(response.completion_message.content);
+```
+
+### Using the OpenAI Node.js SDK
+
+```bash
+npm install openai
+```
+
+```typescript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8321/v1",
+  apiKey: "fake",
+});
+
+const response = await client.chat.completions.create({
+  model: "llama3.2:3b",
+  messages: [{ role: "user", content: "Hello" }],
+});
+console.log(response.choices[0].message.content);
+```
+
+## curl
+
+You can call Llama Stack directly with any HTTP client. No SDK required.
+
+<CodeGroup>
+
+```bash Chat completions
+curl http://localhost:8321/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2:3b",
+    "messages": [
+      {"role": "user", "content": "What is Llama Stack?"}
+    ]
+  }'
+```
+
+```bash List models
+curl http://localhost:8321/v1/models
+```
+
+```bash Responses API
+curl http://localhost:8321/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2:3b",
+    "input": "Explain RAG in one sentence"
+  }'
+```
+
+</CodeGroup>
+
+## Other languages
+
+Any language with an OpenAI-compatible client works with Llama Stack. Point `base_url` (or equivalent) at your server:
+
+| Language | Package | Base URL setting |
+|----------|---------|-----------------|
+| Go | `github.com/openai/openai-go` | `option.WithBaseURL` |
+| Ruby | `openai` gem | `uri_base` |
+| Java | `openai-java` | `baseUrl` |
+| Rust | `async-openai` | `base_url` |
+
+<Tip>
+  All of these clients will work with the `/v1/chat/completions` and `/v1/embeddings` endpoints. To use the Responses API or vector store endpoints, use one of the dedicated Llama Stack SDKs or call the HTTP API directly.
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/getting-started/quickstart">
+    Run the server and make your first call
+  </Card>
+  <Card title="Detailed tutorial" icon="graduation-cap" href="/getting-started/detailed-tutorial">
+    Explore chat, streaming, RAG, tool calling, and more
+  </Card>
+</CardGroup>

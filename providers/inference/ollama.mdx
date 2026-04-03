@@ -1,0 +1,127 @@
+---
+title: Ollama inference provider
+description: Configure and use Ollama as a local inference provider in Llama Stack.
+---
+
+The `remote::ollama` provider connects Llama Stack to a locally running [Ollama](https://ollama.com/) server. Ollama manages model downloads and serves them via an OpenAI-compatible HTTP API, so no cloud account is required.
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install Ollama">
+    Download and install Ollama from [ollama.com](https://ollama.com/download) or with:
+
+    ```bash
+    curl -fsSL https://ollama.com/install.sh | sh
+    ```
+  </Step>
+  <Step title="Pull a model">
+    Ollama uses its own short model names. Pull a model using the Ollama name format:
+
+    ```bash
+    ollama pull llama3.2:3b
+    ```
+
+    Browse all available models at [ollama.com/library](https://ollama.com/library).
+  </Step>
+  <Step title="Start the Ollama server">
+    Ollama starts automatically after installation. To start it manually:
+
+    ```bash
+    ollama serve
+    ```
+
+    By default it listens on `http://localhost:11434`.
+  </Step>
+</Steps>
+
+## Run config
+
+Add the `remote::ollama` provider to your distribution's YAML config:
+
+```yaml
+providers:
+  inference:
+    - provider_id: ollama
+      provider_type: remote::ollama
+      config:
+        base_url: ${env.OLLAMA_URL:=http://localhost:11434/v1}
+```
+
+### Configuration reference
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `base_url` | `http://localhost:11434/v1` | URL of the Ollama server's OpenAI-compatible endpoint |
+| `allowed_models` | `null` (all) | Restrict which models are registered. `null` allows all. |
+| `refresh_models` | `false` | Periodically refresh the model list from Ollama |
+
+## Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OLLAMA_URL` | `http://localhost:11434/v1` | Override the Ollama server URL |
+
+## Python example
+
+When using Ollama as the backend, use the Ollama model name format (e.g. `llama3.2:3b`) as the model identifier:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="none")
+
+# Chat completion — use the Ollama model name as registered
+response = client.chat.completions.create(
+    model="llama3.2:3b",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Explain vector databases in one paragraph."},
+    ],
+)
+print(response.choices[0].message.content)
+```
+
+<Note>
+The model identifier you pass in API calls must match the name Ollama uses. Run `ollama list` to see the exact names of your locally installed models.
+</Note>
+
+## Pulling models
+
+Use `ollama pull` to download any model supported by Ollama. Common Llama models:
+
+```bash
+ollama pull llama3.2:3b
+ollama pull llama3.2:11b
+ollama pull llama3.1:8b
+ollama pull llama3.1:70b
+```
+
+For embedding models:
+
+```bash
+ollama pull nomic-embed-text
+ollama pull mxbai-embed-large
+```
+
+List locally available models:
+
+```bash
+ollama list
+```
+
+## Streaming
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="none")
+
+stream = client.chat.completions.create(
+    model="llama3.2:3b",
+    messages=[{"role": "user", "content": "Count to 10."}],
+    stream=True,
+)
+for chunk in stream:
+    print(chunk.choices[0].delta.content or "", end="", flush=True)
+```

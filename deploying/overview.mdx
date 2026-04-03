@@ -1,0 +1,93 @@
+---
+title: Deploying Llama Stack
+description: Production deployment options for Llama Stack — local, Docker, Kubernetes, and cloud.
+---
+
+Llama Stack runs as an HTTP server that any OpenAI-compatible client can reach. You can run it locally for development, in Docker for a reproducible environment, or on Kubernetes and cloud platforms for production workloads.
+
+## How distributions work
+
+A distribution is a pre-built run config that bundles a specific set of providers for a target environment. You start a server by naming the distribution you want:
+
+```bash
+llama stack run starter
+```
+
+To build a container image, use the provided `Containerfile`:
+
+```bash
+docker build \
+  -f containers/Containerfile \
+  --build-arg DISTRO_NAME=starter \
+  --tag llama-stack:starter .
+```
+
+The server exposes the same API regardless of which distribution you run. Your application code does not change when you move from local development to a Kubernetes cluster.
+
+See [Distributions](/concepts/distributions) for the full config format, environment variable substitution, and a list of built-in distributions.
+
+## Deployment options
+
+<CardGroup cols={2}>
+  <Card title="Local" icon="laptop">
+    Run directly on your machine with `llama stack run starter`. Best for development and experimentation. Supports Ollama, OpenAI, and other providers via environment variables.
+  </Card>
+  <Card title="Docker" icon="docker">
+    Build a container image using the included `Containerfile` and run it anywhere Docker is available. Gives you a reproducible, self-contained server image.
+  </Card>
+  <Card title="Kubernetes" icon="helm">
+    Deploy using the Llama Stack Kubernetes operator. The operator manages the `LlamaStackDistribution` custom resource and automatically creates the Deployment, Service, and PersistentVolumeClaim for you.
+  </Card>
+  <Card title="AWS EKS" icon="aws">
+    Run on Amazon Elastic Kubernetes Service. Use the included `apply.sh` script to set up the default storage class, deploy the server, and wire in IAM credentials for Bedrock access.
+  </Card>
+</CardGroup>
+
+## Start the server
+
+<Tabs>
+  <Tab title="Local">
+    ```bash
+    # With Ollama
+    ollama pull llama3.2:3b
+    uvx --from 'llama-stack[starter]' llama stack run starter
+
+    # With OpenAI
+    export OPENAI_API_KEY=sk-xxx
+    uvx --from 'llama-stack[starter]' llama stack run starter
+    ```
+  </Tab>
+  <Tab title="Docker">
+    ```bash
+    # Build a container image
+    docker build \
+      -f containers/Containerfile \
+      --build-arg DISTRO_NAME=starter \
+      --tag llama-stack:starter .
+
+    # Run the container
+    docker run -p 8321:8321 \
+      -e OPENAI_API_KEY=$OPENAI_API_KEY \
+      llama-stack:starter
+    ```
+  </Tab>
+  <Tab title="Custom config">
+    ```bash
+    # Point to your own run config YAML
+    llama stack run /path/to/my-config.yaml
+    ```
+  </Tab>
+</Tabs>
+
+The server starts at `http://localhost:8321` by default.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Kubernetes" icon="helm" href="/deploying/kubernetes">
+    Step-by-step guide for deploying Llama Stack and vLLM on a Kubernetes cluster using the Llama Stack operator.
+  </Card>
+  <Card title="AWS EKS" icon="aws" href="/deploying/aws-eks">
+    Automated deployment to Amazon EKS with IAM-based Bedrock access and a load balancer.
+  </Card>
+</CardGroup>

@@ -1,0 +1,214 @@
+---
+title: Resources
+description: Models, shields, vector stores, and other named objects that are registered with Llama Stack and routed to providers.
+---
+
+Resources are named objects that Llama Stack tracks and routes. When you make an API call that targets a specific model, shield, or vector store, the server looks up the resource in the `DistributionRegistry` to determine which provider handles it.
+
+## Resource types
+
+Each resource type is associated with one or more APIs:
+
+| Resource | Associated APIs | Description |
+|----------|----------------|-------------|
+| `Model` | inference, eval, post\_training | A language model or embedding model served by an inference provider |
+| `Shield` | safety | A content moderation filter (e.g., Llama Guard, NVIDIA Guardrails) |
+| `VectorStore` (VectorDB) | vector\_io | A vector index for similarity search |
+| `Dataset` | datasetio, eval | A dataset used for evaluation or training |
+| `ScoringFunction` | scoring | A function used to score model outputs |
+| `Benchmark` | eval | An evaluation benchmark |
+| `ToolGroup` | tool\_runtime | A group of tools (MCP server, built-in tools, custom functions) |
+
+## Resource federation
+
+Resources are federated across providers. You can have Llama Stack models served simultaneously by Fireworks, AWS Bedrock, and Ollama — and all of them work through the same `POST /v1/chat/completions` endpoint. The routing table maps each resource to its provider and dispatches requests accordingly.
+
+<Note>
+Because resources are federated, you must register a resource before you can use it with its associated API. The server needs to know which provider to route each resource to.
+</Note>
+
+## Registration
+
+### Automatic discovery
+
+Remote inference providers automatically discover and register models during startup by calling their backend's `list_models()` endpoint. The following providers support automatic model discovery:
+
+- `remote::ollama`
+- `remote::openai`
+- `remote::vllm`
+- `remote::fireworks`
+- `remote::together`
+- `remote::bedrock`
+- Most other remote inference providers
+
+You can also enable periodic model refresh for remote providers that support it:
+
+```yaml
+providers:
+  inference:
+    - provider_id: vllm-inference
+      provider_type: remote::vllm
+      config:
+        base_url: ${env.VLLM_URL:=http://localhost:8000/v1}
+        refresh_models: true
+```
+
+### Explicit registration
+
+Some providers require explicit registration:
+
+- **Inline providers** like `inline::sentence-transformers` have a fixed default model (`nomic-ai/nomic-embed-text-v1.5`). Any other model must be explicitly registered.
+- Custom models not in a provider's default list must be registered before use.
+
+Register resources at startup using the `registered_resources` section of the run config:
+
+```yaml
+registered_resources:
+  models:
+    - provider_id: sentence-transformers
+      model_id: granite-embedding-125m
+      provider_model_id: ibm-granite/granite-embedding-125m-english
+      model_type: embedding
+      metadata:
+        embedding_dimension: 768
+  shields:
+    - shield_id: llama-guard
+      provider_id: ${env.SAFETY_MODEL:+llama-guard}
+      provider_shield_id: ${env.SAFETY_MODEL:=}
+  vector_dbs: []
+  datasets: []
+  scoring_fns: []
+  benchmarks: []
+```
+
+Or register resources at runtime using the API:
+
+<CodeGroup>
+
+```python Python SDK
+from llama_stack_client import LlamaStackClient
+
+client = LlamaStackClient(base_url="http://localhost:8321")
+
+# Register a model
+client.models.register(
+    model_id="my-fine-tuned-model",
+    provider_id="ollama",
+    provider_model_id="my-fine-tuned-model:latest",
+    model_type="llm",
+)
+
+# Register a shield
+client.shields.register(
+    shield_id="my-shield",
+    provider_id="llama-guard",
+    provider_shield_id="meta-llama/Llama-Guard-3-8B",
+)
+```
+
+```bash curl
+curl -X POST http://localhost:8321/v1/models \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_id": "my-fine-tuned-model",
+    "provider_id": "ollama",
+    "provider_model_id": "my-fine-tuned-model:latest",
+    "model_type": "llm"
+  }'
+```
+
+</CodeGroup>
+
+## Persistence
+
+All registered resources are persisted to the `DistributionRegistry` in `src/llama_stack/core/store/`. The registry writes to the configured KVStore backend (SQLite by default), so resources survive server restarts. You do not need to re-register resources after restarting the server.
+
+## Listing registered resources
+
+You can list registered resources through the API or the OpenAI-compatible endpoint:
+
+<Tabs>
+  <Tab title="Models">
+    ```python
+    # Via the Llama Stack client
+    models = client.models.list()
+    for model in models:
+        print(model.model_id, model.provider_id)
+    ```
+
+    ```bash
+    # Via the OpenAI-compatible endpoint
+    curl http://localhost:8321/v1/models
+    ```
+
+    Example response:
+
+    ```json
+    {
+      "object": "list",
+      "data": [
+        {
+          "id": "ollama/llama3.2:3b",
+          "object": "model",
+          "owned_by": "ollama"
+        },
+        {
+          "id": "openai/gpt-4o",
+          "object": "model",
+          "owned_by": "openai"
+        },
+        {
+          "id": "nomic-ai/nomic-embed-text-v1.5",
+          "object": "model",
+          "owned_by": "sentence-transformers"
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="Shields">
+    ```python
+    shields = client.shields.list()
+    for shield in shields:
+        print(shield.shield_id, shield.provider_id)
+    ```
+
+    ```bash
+    curl http://localhost:8321/v1/shields
+    ```
+  </Tab>
+  <Tab title="Vector stores">
+    ```python
+    stores = client.vector_stores.list()
+    for store in stores:
+        print(store.id, store.name)
+    ```
+
+    ```bash
+    curl http://localhost:8321/v1/vector_stores
+    ```
+  </Tab>
+  <Tab title="Datasets">
+    ```python
+    datasets = client.datasets.list()
+    for dataset in datasets:
+        print(dataset.dataset_id, dataset.provider_id)
+    ```
+
+    ```bash
+    curl http://localhost:8321/v1/datasets
+    ```
+  </Tab>
+</Tabs>
+
+## Provider assignment
+
+When you register a resource, you associate it with a `provider_id`. This determines which configured provider handles requests for that resource. If you have both `remote::ollama` and `remote::openai` configured as inference providers, registering a model with `provider_id: openai` means all inference calls for that model go to the OpenAI provider.
+
+The `provider_model_id` field is the identifier the provider itself uses for the model, which may differ from the `model_id` you register it under in Llama Stack:
+
+```yaml
+- model_id: my-llama          # The ID your application uses
+  provider_id: ollama
+  provider_model_id: llama3.2:3b-instruct-fp16   # The ID Ollama uses
+```

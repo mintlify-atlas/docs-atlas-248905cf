@@ -1,0 +1,167 @@
+---
+title: Providers overview
+description: How the pluggable provider architecture works and how to configure providers in a Llama Stack run config.
+---
+
+Llama Stack lets you swap out different implementations for the same API. Every capability — inference, vector storage, safety, tools — is backed by a **provider**, and providers come in two flavors:
+
+- **Remote** — adapts an external service (Ollama, OpenAI, vLLM, Bedrock, Anthropic, etc.)
+- **Inline** — runs in-process within Llama Stack (FAISS, sqlite-vec, Llama Guard, etc.)
+
+At least one inline provider exists for each API category, so you can run a fully featured stack locally without any external dependencies.
+
+## Provider categories
+
+<CardGroup cols={2}>
+  <Card title="Inference" icon="brain" href="/providers/inference/ollama">
+    Generate completions, chat completions, and embeddings. Supports LLM, embedding, and rerank model types.
+  </Card>
+  <Card title="Vector IO" icon="database" href="/providers/vector-io">
+    Store and query document embeddings for retrieval-augmented generation.
+  </Card>
+  <Card title="Safety" icon="shield" href="/providers/safety">
+    Content moderation and safety shields via Llama Guard, Prompt Guard, Bedrock Guardrails, and others.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/providers/tools">
+    Built-in tool runtimes: file search, web search, Wolfram Alpha, and MCP servers.
+  </Card>
+</CardGroup>
+
+## Inference providers
+
+| Provider type | Supports | Notes |
+|---|---|---|
+| `remote::ollama` | LLM, embeddings | Runs local models via Ollama runtime. Default base URL: `http://localhost:11434/v1`. |
+| `remote::openai` | LLM, embeddings | OpenAI GPT models. Requires `OPENAI_API_KEY`. |
+| `remote::vllm` | LLM, embeddings | Self-hosted vLLM server. Set `VLLM_URL` to the server base URL. |
+| `remote::bedrock` | LLM, embeddings | AWS Bedrock via OpenAI-compatible endpoint. Uses AWS credentials. |
+| `remote::anthropic` | LLM | Anthropic Claude models. Requires `ANTHROPIC_API_KEY`. |
+| `remote::azure` | LLM, embeddings | Azure OpenAI Service. Requires endpoint, API key, and API version. |
+| `remote::cerebras` | LLM | Cerebras Cloud platform. Requires `CEREBRAS_API_KEY`. |
+| `remote::databricks` | LLM | Databricks model serving. Requires host URL and token. |
+| `remote::fireworks` | LLM | Fireworks AI platform. Requires `FIREWORKS_API_KEY`. |
+| `remote::gemini` | LLM | Google Gemini models. Requires `GEMINI_API_KEY`. |
+| `remote::groq` | LLM | Groq LPU inference. Requires `GROQ_API_KEY`. |
+| `remote::nvidia` | LLM, rerank | NVIDIA NIM. Requires `NVIDIA_API_KEY`. |
+| `remote::runpod` | LLM | RunPod cloud GPU. Requires endpoint URL and API token. |
+| `remote::sambanova` | LLM | SambaNova dataflow architecture. Requires `SAMBANOVA_API_KEY`. |
+| `remote::together` | LLM | Together AI platform. Requires `TOGETHER_API_KEY`. |
+| `remote::vertexai` | LLM | Google Vertex AI (Gemini models). Uses GCP Application Default Credentials. |
+| `remote::watsonx` | LLM | IBM WatsonX. Requires `WATSONX_API_KEY` and project ID. |
+| `inline::sentence-transformers` | Embeddings | Local embedding models via sentence-transformers. No external service needed. |
+| `inline::transformers` | LLM, embeddings | Local models via HuggingFace Transformers. No external service needed. |
+
+## How to configure providers in a run config
+
+Llama Stack distributions are configured with a YAML run config. Each API section lists one or more providers. Here is an annotated example:
+
+```yaml
+version: "2"
+
+apis:
+  - inference
+  - vector_io
+  - safety
+  - tool_runtime
+
+providers:
+  inference:
+    - provider_id: ollama
+      provider_type: remote::ollama
+      config:
+        base_url: ${env.OLLAMA_URL:=http://localhost:11434/v1}
+
+  vector_io:
+    - provider_id: sqlite_vec
+      provider_type: inline::sqlite-vec
+      config:
+        db_path: ${env.SQLITE_STORE_DIR:=~/.llama/dummy}/sqlite_vec.db
+        persistence:
+          namespace: vector_io::sqlite_vec
+          backend: kv_default
+
+  safety:
+    - provider_id: llama_guard
+      provider_type: inline::llama-guard
+      config:
+        excluded_categories: []
+
+  tool_runtime:
+    - provider_id: file_search
+      provider_type: inline::file-search
+      config: {}
+```
+
+<Note>
+Provider configuration values can reference environment variables with `${env.VAR_NAME:=default}`. The `:=default` part is optional and provides a fallback value when the variable is not set.
+</Note>
+
+## How to switch providers
+
+To change which inference provider a distribution uses, update the `provider_type` and `config` fields in the run config. For example, to switch from Ollama to vLLM:
+
+<Tabs>
+  <Tab title="Ollama">
+    ```yaml
+    providers:
+      inference:
+        - provider_id: ollama
+          provider_type: remote::ollama
+          config:
+            base_url: ${env.OLLAMA_URL:=http://localhost:11434/v1}
+    ```
+  </Tab>
+  <Tab title="vLLM">
+    ```yaml
+    providers:
+      inference:
+        - provider_id: vllm
+          provider_type: remote::vllm
+          config:
+            base_url: ${env.VLLM_URL:=}
+            max_tokens: ${env.VLLM_MAX_TOKENS:=4096}
+            api_token: ${env.VLLM_API_TOKEN:=fake}
+    ```
+  </Tab>
+  <Tab title="OpenAI">
+    ```yaml
+    providers:
+      inference:
+        - provider_id: openai
+          provider_type: remote::openai
+          config:
+            api_key: ${env.OPENAI_API_KEY:=}
+    ```
+  </Tab>
+</Tabs>
+
+You can also run multiple inference providers side by side and route different models to different providers using the model registry.
+
+## Provider sections
+
+<CardGroup cols={2}>
+  <Card title="Ollama" href="/providers/inference/ollama">
+    Local model runner — no cloud account required.
+  </Card>
+  <Card title="OpenAI" href="/providers/inference/openai">
+    GPT-4o and other OpenAI-hosted models.
+  </Card>
+  <Card title="vLLM" href="/providers/inference/vllm">
+    Self-hosted high-throughput inference server.
+  </Card>
+  <Card title="AWS Bedrock" href="/providers/inference/bedrock">
+    Managed inference on AWS.
+  </Card>
+  <Card title="Other inference providers" href="/providers/inference/other">
+    Anthropic, Azure, Cerebras, Fireworks, Gemini, Groq, NVIDIA, and more.
+  </Card>
+  <Card title="Vector IO" href="/providers/vector-io">
+    FAISS, sqlite-vec, ChromaDB, pgvector, Qdrant, Weaviate.
+  </Card>
+  <Card title="Safety" href="/providers/safety">
+    Llama Guard, Prompt Guard, Bedrock Guardrails.
+  </Card>
+  <Card title="Tools" href="/providers/tools">
+    File search, web search, Wolfram Alpha, MCP.
+  </Card>
+</CardGroup>

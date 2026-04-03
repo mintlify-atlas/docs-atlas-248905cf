@@ -1,0 +1,161 @@
+---
+title: AWS EKS deployment
+description: Deploy Llama Stack on Amazon Elastic Kubernetes Service with automated setup and Bedrock IAM access.
+---
+
+Deploy Llama Stack on Amazon EKS using the included deployment script. The script configures the default storage class, deploys the Llama Stack server into Kubernetes pods and services, and wires in the environment variables your providers need.
+
+## Prerequisites
+
+Before you begin, you need:
+
+- An [EKS cluster](https://docs.aws.amazon.com/eks/latest/userguide/getting-started.html) with `kubectl` configured against it.
+- A [Hugging Face token](https://huggingface.co/settings/tokens) for accessing gated models.
+- A [GitHub OAuth app](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) if you want to enable the Llama Stack UI login flow.
+
+<Note>
+  When creating the GitHub OAuth app, set the authorization callback URL to `http://<your-llama-stack-ui-url>/api/auth/callback/`.
+</Note>
+
+## Automated deployment
+
+<Steps>
+  <Step title="Set required environment variables">
+    Export your credentials and configuration before running the deployment script:
+
+    ```bash
+    export HF_TOKEN=<your-huggingface-token>
+    export GITHUB_CLIENT_ID=<your-github-client-id>
+    export GITHUB_CLIENT_SECRET=<your-github-client-secret>
+    export LLAMA_STACK_UI_URL=<your-llama-stack-ui-url>
+    ```
+
+    <Warning>
+      Do not commit these values to source control. Store them in a secrets manager or CI/CD secret store and inject them at deploy time.
+    </Warning>
+  </Step>
+
+  <Step title="Run the deployment script">
+    Change to the EKS distribution directory and execute the script:
+
+    ```bash
+    cd docs/source/distributions/eks
+    ./apply.sh
+    ```
+
+    The script performs the following steps automatically:
+
+    - Sets up the default storage class for AWS EKS
+    - Deploys the Llama Stack server in Kubernetes pods and services
+  </Step>
+
+  <Step title="Verify the deployment">
+    Check that the Llama Stack pods are running:
+
+    ```bash
+    kubectl get pods -l app.kubernetes.io/name=llama-stack
+    ```
+
+    Check the services:
+
+    ```bash
+    kubectl get services | grep llama-stack
+    ```
+  </Step>
+
+  <Step title="Test the endpoint">
+    If you deployed a load balancer service, retrieve the external hostname:
+
+    ```bash
+    kubectl get svc -o wide | grep llama-stack
+    ```
+
+    Send a test request against the external address:
+
+    ```bash
+    llama-stack-client --endpoint http://<external-hostname>:8321 \
+      inference chat-completion --message "hello, what model are you?"
+    ```
+
+    For internal testing before the load balancer is reachable, use port-forward:
+
+    ```bash
+    kubectl port-forward service/llama-stack-service 8321:8321
+    ```
+  </Step>
+</Steps>
+
+## IAM configuration for Bedrock access
+
+To use Amazon Bedrock as an inference provider, the pod needs AWS credentials. The recommended approach on EKS is IAM Roles for Service Accounts (IRSA).
+
+<Steps>
+  <Step title="Create an IAM policy">
+    Create a policy that allows Bedrock model invocation:
+
+    ```json bedrock-policy.json
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "bedrock:InvokeModel",
+            "bedrock:InvokeModelWithResponseStream"
+          ],
+          "Resource": "*"
+        }
+      ]
+    }
+    ```
+
+    ```bash
+    aws iam create-policy \
+      --policy-name LlamaStackBedrockPolicy \
+      --policy-document file://bedrock-policy.json
+    ```
+  </Step>
+
+  <Step title="Create an IAM role for the service account">
+    Associate the IAM policy with the Kubernetes service account used by the Llama Stack pod:
+
+    ```bash
+    eksctl create iamserviceaccount \
+      --name llama-stack \
+      --namespace default \
+      --cluster <your-cluster-name> \
+      --attach-policy-arn arn:aws:iam::<account-id>:policy/LlamaStackBedrockPolicy \
+      --approve \
+      --override-existing-serviceaccounts
+    ```
+  </Step>
+
+  <Step title="Set the Bedrock region environment variable">
+    Pass the AWS region to the Llama Stack container via an environment variable. If you are using the `LlamaStackDistribution` operator resource, add it under `server.containerSpec.env`:
+
+    ```yaml
+    env:
+    - name: AWS_DEFAULT_REGION
+      value: "us-east-1"
+    ```
+
+    The Bedrock provider in the `starter` distribution reads `AWS_DEFAULT_REGION` and uses the pod's IRSA credentials automatically — no access key or secret key is required.
+  </Step>
+</Steps>
+
+## Environment variable reference
+
+| Variable | Required | Description |
+|---|---|---|
+| `HF_TOKEN` | Yes | Hugging Face token for downloading gated models |
+| `GITHUB_CLIENT_ID` | For UI login | GitHub OAuth app client ID |
+| `GITHUB_CLIENT_SECRET` | For UI login | GitHub OAuth app client secret |
+| `LLAMA_STACK_UI_URL` | For UI login | Public URL of the Llama Stack UI |
+| `AWS_DEFAULT_REGION` | For Bedrock | AWS region for Bedrock model invocation |
+
+## Related resources
+
+- [Deploying overview](/deploying/overview) — all deployment options
+- [Kubernetes deployment](/deploying/kubernetes) — cluster setup with the Llama Stack operator
+- [Distributions](/concepts/distributions) — provider selection and config format
+- [EKS getting started](https://docs.aws.amazon.com/eks/latest/userguide/getting-started.html) — AWS documentation for creating an EKS cluster

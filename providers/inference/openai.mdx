@@ -1,0 +1,129 @@
+---
+title: OpenAI inference provider
+description: Configure OpenAI as a remote inference provider in Llama Stack.
+---
+
+The `remote::openai` provider connects Llama Stack to OpenAI's API, giving you access to GPT-4o, GPT-4o-mini, o1, o3, and other OpenAI-hosted models.
+
+## Prerequisites
+
+You need an OpenAI API key. Get one from [platform.openai.com](https://platform.openai.com/api-keys).
+
+## Environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | Your OpenAI API key |
+| `OPENAI_BASE_URL` | No | Override the API base URL (defaults to `https://api.openai.com/v1`) |
+
+Export your key before starting Llama Stack:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+## Run config
+
+```yaml
+providers:
+  inference:
+    - provider_id: openai
+      provider_type: remote::openai
+      config:
+        api_key: ${env.OPENAI_API_KEY:=}
+        base_url: ${env.OPENAI_BASE_URL:=https://api.openai.com/v1}
+```
+
+### Configuration reference
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `api_key` | — | OpenAI API key (reads from `OPENAI_API_KEY`) |
+| `base_url` | `https://api.openai.com/v1` | API base URL |
+| `allowed_models` | `null` (all) | Restrict which models are registered |
+| `refresh_models` | `false` | Periodically refresh the model list from OpenAI |
+
+## Supported models
+
+All models available through the OpenAI API are accessible once registered. Common examples:
+
+| Model ID | Type |
+|----------|------|
+| `openai/gpt-4o` | LLM |
+| `openai/gpt-4o-mini` | LLM |
+| `openai/o1` | LLM (reasoning) |
+| `openai/o3-mini` | LLM (reasoning) |
+| `openai/text-embedding-3-small` | Embedding |
+| `openai/text-embedding-3-large` | Embedding |
+
+## Python example
+
+```python
+from llama_stack_client import LlamaStackClient
+
+client = LlamaStackClient(base_url="http://localhost:8321")
+
+# List available models
+models = client.models.list()
+
+# Chat completion
+response = client.chat.completions.create(
+    model="openai/gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What is the capital of France?"},
+    ],
+)
+print(response.choices[0].message.content)
+```
+
+### Structured output
+
+```python
+import json
+
+response = client.chat.completions.create(
+    model="openai/gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "Extract the participants from the event."},
+        {"role": "user", "content": "Alice and Bob are attending a hackathon on Friday."},
+    ],
+    response_format={
+        "type": "json_schema",
+        "json_schema": {
+            "name": "participants",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "participants": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["participants"],
+            },
+        },
+    },
+)
+print(json.loads(response.choices[0].message.content))
+```
+
+### Embeddings
+
+```python
+embedding_response = client.embeddings.create(
+    model="openai/text-embedding-3-small",
+    input="Llama Stack is a pluggable inference framework.",
+)
+vector = embedding_response.data[0].embedding
+print(f"Embedding dimension: {len(vector)}")
+```
+
+### Streaming
+
+```python
+stream = client.chat.completions.create(
+    model="openai/gpt-4o-mini",
+    messages=[{"role": "user", "content": "Write a short poem about coding."}],
+    stream=True,
+)
+for chunk in stream:
+    print(chunk.choices[0].delta.content or "", end="", flush=True)
+```

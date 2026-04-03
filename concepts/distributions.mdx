@@ -1,0 +1,190 @@
+---
+title: Distributions
+description: Pre-built configurations that bundle specific providers for a target environment.
+---
+
+A distribution is a pre-built run config that bundles specific providers for a target deployment environment. Think of it like Kubernetes distributions (AKS, EKS, GKE) — the API stays the same across all of them, but each distribution wires different backends.
+
+Distributions live in `src/llama_stack/distributions/`. Each distribution directory contains a `config.yaml` that is the run config for that environment.
+
+## Available distributions
+
+<CardGroup cols={2}>
+  <Card title="starter" icon="play">
+    General-purpose distribution that includes all providers and auto-enables them based on available environment variables. The recommended starting point for most users.
+  </Card>
+  <Card title="nvidia" icon="microchip">
+    Optimized for NVIDIA hardware. Uses the NVIDIA NIM inference provider and NVIDIA's Guardrails service for safety.
+  </Card>
+  <Card title="watsonx" icon="cloud">
+    Configured for IBM watsonx.ai as the inference backend.
+  </Card>
+  <Card title="postgres-demo" icon="database">
+    Demo distribution wired for PostgreSQL storage backends.
+  </Card>
+  <Card title="open-benchmark" icon="chart-bar">
+    Configured for running open benchmark evaluations.
+  </Card>
+  <Card title="ci-tests" icon="flask">
+    Minimal distribution used in CI test runs.
+  </Card>
+</CardGroup>
+
+## The starter distribution
+
+Most users should start with `starter`. It includes every available provider and conditionally enables each one based on whether the corresponding environment variable is set:
+
+```bash
+# Run with Ollama (auto-detected if OLLAMA_URL is set, or defaults to localhost:11434)
+uv run llama stack run starter
+
+# Run with OpenAI
+OPENAI_API_KEY=sk-... uv run llama stack run starter
+
+# Run with multiple providers at once
+OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... uv run llama stack run starter
+```
+
+The starter distribution includes both FAISS (in-memory) and sqlite-vec (disk-persistent) for vector storage, sentence-transformers for embeddings, and Qwen3-Reranker for reranking — all running locally with no external dependencies required.
+
+## Distribution config format
+
+A distribution config is a YAML file that declares everything about a running Llama Stack instance:
+
+```yaml
+version: 2
+distro_name: starter
+apis:
+  - inference
+  - responses
+  - safety
+  - vector_io
+  - datasetio
+  - eval
+  - scoring
+  - tool_runtime
+  - files
+  - batches
+providers:
+  inference:
+    - provider_id: ollama
+      provider_type: remote::ollama
+      config:
+        base_url: ${env.OLLAMA_URL:=http://localhost:11434/v1}
+    - provider_id: openai
+      provider_type: remote::openai
+      config:
+        api_key: ${env.OPENAI_API_KEY:=}
+  vector_io:
+    - provider_id: faiss
+      provider_type: inline::faiss
+      config:
+        persistence:
+          namespace: vector_io::faiss
+          backend: kv_default
+    - provider_id: sqlite-vec
+      provider_type: inline::sqlite-vec
+      config:
+        db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/starter}/sqlite_vec.db
+  safety:
+    - provider_id: llama-guard
+      provider_type: inline::llama-guard
+      config: {}
+storage:
+  stores:
+    kv_default:
+      type: kv_sqlite
+      db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/starter}/kvstore.db
+```
+
+## Environment variable substitution
+
+Distribution configs use a substitution syntax so sensitive values and environment-specific paths never need to be hardcoded.
+
+### Default values
+
+Use `:=` to supply a fallback when the variable is not set:
+
+```yaml
+base_url: ${env.OLLAMA_URL:=http://localhost:11434/v1}
+```
+
+If `OLLAMA_URL` is set, its value is used. Otherwise the default `http://localhost:11434/v1` is used.
+
+### Conditional providers
+
+Use `:+` to enable a provider only when a variable is set:
+
+```yaml
+- provider_id: ${env.NVIDIA_API_KEY:+nvidia}
+  provider_type: remote::nvidia
+  config:
+    api_key: ${env.NVIDIA_API_KEY:=}
+```
+
+If `NVIDIA_API_KEY` is not set, `provider_id` evaluates to an empty string and the provider is skipped entirely. This is how the starter distribution enables only the providers you have credentials for.
+
+### Required variables (no default)
+
+Omit the default to require a variable — the server will fail to start if it is missing:
+
+```yaml
+api_key: ${env.OPENAI_API_KEY}
+```
+
+## Pre-registering resources
+
+Distributions can pre-register resources (models, shields, vector stores, etc.) that are made available immediately on startup, without any client-side registration calls:
+
+```yaml
+registered_resources:
+  models: []
+  shields:
+    - shield_id: llama-guard
+      provider_id: ${env.SAFETY_MODEL:+llama-guard}
+      provider_shield_id: ${env.SAFETY_MODEL:=}
+  vector_dbs: []
+  datasets: []
+  scoring_fns: []
+  benchmarks: []
+```
+
+## Custom distributions
+
+You can create your own distribution by writing a run config YAML and passing it to `llama stack run`:
+
+```bash
+uv run llama stack run /path/to/my-config.yaml
+```
+
+To build a Docker container image from a distribution config, use the provided `Containerfile`:
+
+```bash
+docker build \
+  -f containers/Containerfile \
+  --build-arg DISTRO_NAME=starter \
+  --tag llama-stack:starter .
+```
+
+## Multiple providers per API
+
+A single distribution can configure multiple providers for the same API. The routing table dispatches each request to the right provider based on the resource (model, vector store, shield, etc.):
+
+```yaml
+providers:
+  inference:
+    - provider_id: ollama
+      provider_type: remote::ollama
+      config:
+        base_url: ${env.OLLAMA_URL:=http://localhost:11434/v1}
+    - provider_id: openai
+      provider_type: remote::openai
+      config:
+        api_key: ${env.OPENAI_API_KEY:=}
+    - provider_id: bedrock
+      provider_type: remote::bedrock
+      config:
+        region_name: ${env.AWS_DEFAULT_REGION:=us-east-2}
+```
+
+All three inference providers are available simultaneously. Requests are routed based on the model identifier — models pulled into Ollama go to the Ollama provider, GPT-4 goes to OpenAI, and Claude via Bedrock goes to Bedrock. The client uses the same endpoint and the same SDK for all of them.

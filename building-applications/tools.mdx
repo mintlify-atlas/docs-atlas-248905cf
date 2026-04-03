@@ -1,0 +1,306 @@
+---
+title: Tools
+description: Extend agents with file search, web search, WolframAlpha, MCP servers, and custom Python functions.
+---
+
+Tools are functions an agent can call to interact with external systems. Llama Stack provides built-in server-side tools and supports client-side custom tools and MCP servers.
+
+<Note>
+  Built-in tools (web search, file search, WolframAlpha) are auto-registered based on your provider configuration. The `/v1/tools` and `/v1/toolgroups` endpoints are available for tool discovery and management. For MCP servers, use the Connectors API.
+</Note>
+
+## Built-in tools
+
+Built-in tool groups are automatically registered when the corresponding `tool_runtime` provider is configured in your stack.
+
+### File search (RAG)
+
+The `file_search` tool enables vector store retrieval. Configure `inline::file-search` as a `tool_runtime` provider and the `builtin::file_search` tool group is auto-registered.
+
+```python
+agent = Agent(
+    client,
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    instructions="You are a helpful assistant",
+    tools=[
+        {
+            "type": "file_search",
+            "vector_store_ids": ["vs_abc123"],
+        }
+    ],
+)
+```
+
+See the [RAG guide](/building-applications/rag) for full setup instructions including file upload and vector store creation.
+
+### Web search
+
+Three providers support web search: **Brave Search**, **Bing Search**, and **Tavily Search**. Configure any of them as a `tool_runtime` provider and `builtin::websearch` is auto-registered.
+
+<Steps>
+  <Step title="Set your API key">
+    ```bash
+    export TAVILY_SEARCH_API_KEY="your_key"
+    ```
+    Or pass it from the client side:
+    ```python
+    client = LlamaStackClient(
+        base_url="http://localhost:8321",
+        provider_data={"tavily_search_api_key": "your_key"},
+    )
+    ```
+  </Step>
+  <Step title="Create an agent with web search">
+    ```python
+    from llama_stack_client import Agent, LlamaStackClient
+    from llama_stack_client.lib.agents.event_logger import EventLogger
+
+    client = LlamaStackClient(base_url="http://localhost:8321")
+
+    agent = Agent(
+        client,
+        model="meta-llama/Llama-3.2-3B-Instruct",
+        instructions=(
+            "You are a web search assistant. Use the websearch tool "
+            "to look up current information."
+        ),
+        tools=["builtin::websearch"],
+    )
+
+    session_id = agent.create_session("websearch-session")
+
+    response = agent.create_turn(
+        messages=[
+            {"role": "user", "content": "How did the USA perform in the last Olympics?"}
+        ],
+        session_id=session_id,
+    )
+
+    for log in EventLogger().log(response):
+        log.print()
+    ```
+  </Step>
+</Steps>
+
+You can also pass the API key dynamically via the `X-LlamaStack-Provider-Data` request header:
+
+```
+{"tavily_search_api_key": "<your_key>"}
+```
+
+### WolframAlpha (math)
+
+Configure `remote::wolfram-alpha` as a `tool_runtime` provider and `builtin::wolfram_alpha` is auto-registered.
+
+```python
+agent = Agent(
+    client,
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    instructions="You are a mathematical assistant that can solve complex equations.",
+    tools=["builtin::wolfram_alpha"],
+)
+
+session_id = agent.create_session("math-session")
+
+response = agent.create_turn(
+    messages=[
+        {"role": "user", "content": "Solve x^2 + 2x + 1 = 0 using WolframAlpha"}
+    ],
+    session_id=session_id,
+)
+```
+
+## MCP servers
+
+[Model Context Protocol (MCP)](https://github.com/modelcontextprotocol) allows tools to be dynamically discovered from an MCP endpoint.
+
+### Remote MCP servers
+
+Register a remote MCP server as a connector in your stack config:
+
+```yaml
+connectors:
+  - connector_id: "mcp::deepwiki"
+    connector_type: mcp
+    url: "https://mcp.deepwiki.com/sse"
+```
+
+Then reference the connector by `connector_id` when creating an agent:
+
+```python
+agent = Agent(
+    client,
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    instructions="You are a helpful assistant.",
+    tools=[
+        {
+            "type": "mcp",
+            "connector_id": "mcp::deepwiki",
+            "server_label": "deepwiki",
+        }
+    ],
+)
+agent.create_turn(...)
+```
+
+If the MCP server requires OAuth authentication, pass the token in the tool definition:
+
+```python
+tools=[
+    {
+        "type": "mcp",
+        "connector_id": "mcp::deepwiki",
+        "server_label": "deepwiki",
+        "authorization": "<your_access_token>",  # OAuth token, without "Bearer " prefix
+    }
+]
+```
+
+You can also pass `server_url` directly without registering a connector:
+
+```python
+tools=[
+    {
+        "type": "mcp",
+        "server_url": "https://mcp.deepwiki.com/sse",
+        "server_label": "deepwiki",
+    }
+]
+```
+
+### Running your own MCP server
+
+<Tabs>
+  <Tab title="Start the server">
+    ```bash
+    mkdir /tmp/content
+    touch /tmp/content/foo
+    touch /tmp/content/bar
+    npx -y supergateway --port 8000 --stdio 'npx -y @modelcontextprotocol/server-filesystem /tmp/content'
+    ```
+  </Tab>
+  <Tab title="Register and use">
+    Register it as a connector in your stack config:
+
+    ```yaml
+    connectors:
+      - connector_id: "mcp::filesystem"
+        connector_type: mcp
+        url: "http://localhost:8000/sse"
+    ```
+
+    Then reference it when creating the agent:
+
+    ```python
+    agent = Agent(
+        client,
+        model="meta-llama/Llama-3.2-3B-Instruct",
+        instructions="You are a helpful file system assistant.",
+        tools=[
+            {
+                "type": "mcp",
+                "connector_id": "mcp::filesystem",
+                "server_label": "filesystem",
+            }
+        ],
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Custom (client-side) tools
+
+For tools beyond the built-ins, define a Python function with a docstring. The docstring is passed to the model as the tool description.
+
+```python
+def my_tool(input: int) -> int:
+    """
+    Runs my awesome tool.
+
+    :param input: some int parameter
+    """
+    return input * 2
+```
+
+Pass it directly to the `Agent`:
+
+```python
+agent = Agent(client, model="...", instructions="...", tools=[my_tool])
+```
+
+The `Agent` class handles the full lifecycle: sending the tool definition to the model, executing the function when the model calls it, and returning the result for the next iteration.
+
+<Tip>
+  Write clear, specific docstrings. The model uses the docstring to decide when and how to call the tool. Experiment with different wording to see what produces the best behavior.
+</Tip>
+
+## Multiple tool types together
+
+<CodeGroup>
+
+```python file_search + web_search
+agent = Agent(
+    client,
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    instructions="You are a research assistant.",
+    tools=[
+        {
+            "type": "file_search",
+            "vector_store_ids": ["vs_abc123"],
+        },
+        "builtin::websearch",
+    ],
+)
+```
+
+```python web_search + custom function
+def get_current_date() -> str:
+    """Returns today's date in ISO format."""
+    from datetime import date
+    return date.today().isoformat()
+
+agent = Agent(
+    client,
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    instructions="You are a helpful assistant.",
+    tools=["builtin::websearch", get_current_date],
+)
+```
+
+```python MCP + file_search
+agent = Agent(
+    client,
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    instructions="You are a document assistant.",
+    tools=[
+        {
+            "type": "file_search",
+            "vector_store_ids": ["vs_abc123"],
+        },
+        {
+            "type": "mcp",
+            "connector_id": "mcp::deepwiki",
+            "server_label": "deepwiki",
+        },
+    ],
+)
+```
+
+</CodeGroup>
+
+## Server-side vs client-side execution
+
+| | Server-side tools | Client-side tools |
+|---|---|---|
+| **Execution** | Runs on the server transparently | Tool call returned to client; you call `agent.resume_turn()` |
+| **Examples** | `builtin::websearch`, `file_search`, MCP | Custom Python functions |
+| **Best for** | Production reliability and security | Prototyping, specialized integrations |
+
+With client-side tools, the agent returns the tool call to you for execution. Use `agent.resume_turn()` to send the result back and continue the loop.
+
+## Best practices
+
+- Store API keys as environment variables or in secure configuration — never hard-code them.
+- Validate custom tool inputs and outputs to avoid unexpected model behavior.
+- Write detailed docstrings that include parameter types, expected values, and return format.
+- Test tool descriptions with the model to confirm it calls the tool correctly.

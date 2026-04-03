@@ -1,0 +1,70 @@
+---
+title: Telemetry
+description: Instrument Llama Stack with OpenTelemetry to capture traces, metrics, and performance data from your AI applications.
+---
+
+Llama Stack instruments itself with [OpenTelemetry](https://opentelemetry.io/). When you enable OpenTelemetry auto-instrumentation, Llama Stack enriches the collected spans with information about inference calls, tool executions, safety checks, and more.
+
+## Forwarding traces to a collector
+
+Set the standard OpenTelemetry environment variables, install the instrumentation packages, and start the server with the `opentelemetry-instrument` launcher:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:4318"
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_SERVICE_NAME="llama-stack-server"
+
+uv pip install opentelemetry-distro opentelemetry-exporter-otlp
+uv run opentelemetry-bootstrap -a requirements | uv pip install --requirement -
+
+uv run opentelemetry-instrument llama stack run starter
+```
+
+This sends all traces to your OTLP collector (Jaeger, Grafana Tempo, Honeycomb, Datadog, etc.) at the configured endpoint.
+
+## Configuration reference
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `http://127.0.0.1:4318` |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | Transport protocol | `http/protobuf` or `grpc` |
+| `OTEL_SERVICE_NAME` | Service name shown in your observability tool | `llama-stack-server` |
+| `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS` | Comma-separated list of instrumentors to disable | `sqlite3,asyncpg` |
+
+## Known issue: duplicate database spans
+
+When OpenTelemetry auto-instrumentation is active, both the low-level database driver instrumentor (e.g. `asyncpg`, `sqlite3`) and the SQLAlchemy ORM instrumentor activate simultaneously. This causes every database operation to be traced twice — once at the ORM level and once at the raw protocol level. The driver-level spans also expose internal connection pool health-check queries, which adds noise to your traces.
+
+To prevent duplicate spans, disable the driver-level instrumentors:
+
+```bash
+export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="sqlite3,asyncpg"
+```
+
+<Note>
+  The Llama Stack container image sets `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS` automatically whenever any `OTEL_*` environment variable is present.
+</Note>
+
+## Viewing traces
+
+Send your traces to any OTLP-compatible backend. Two common options:
+
+<CardGroup cols={2}>
+  <Card title="Jaeger" icon="chart-network" href="https://www.jaegertracing.io/">
+    Open-source distributed tracing system. Run locally with Docker for development.
+  </Card>
+  <Card title="OpenTelemetry Collector" icon="circle-nodes" href="https://opentelemetry.io/docs/collector/">
+    Vendor-agnostic pipeline for receiving, processing, and exporting telemetry data.
+  </Card>
+</CardGroup>
+
+### Local Jaeger setup
+
+```bash
+docker run -d --name jaeger \
+  -p 16686:16686 \
+  -p 4318:4318 \
+  jaegertracing/all-in-one:latest
+```
+
+Then open `http://localhost:16686` to view traces. Set `OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"` when starting Llama Stack.

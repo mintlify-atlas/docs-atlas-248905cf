@@ -1,0 +1,266 @@
+---
+title: Detailed tutorial
+description: Build AI applications with Llama Stack using the standard OpenAI SDK — chat, streaming, tool calling, RAG, MCP, and more.
+---
+
+This tutorial assumes you have completed the [Quickstart](/getting-started/quickstart) and have a running Llama Stack server at `http://localhost:8321`. You will build progressively more complex applications using the standard OpenAI SDK.
+
+<Note>
+  **OpenAI compatibility** — Llama Stack exposes a fully OpenAI-compatible API. The `base_url="http://localhost:8321/v1"` points the SDK at your local server instead of OpenAI's cloud. The `api_key="fake"` value is required by the SDK client but is not validated by Llama Stack unless you explicitly configure authentication.
+</Note>
+
+## Installation
+
+<Steps>
+  <Step title="Install the OpenAI SDK">
+    <CodeGroup>
+
+    ```bash pip
+    pip install openai
+    ```
+
+    ```bash uv
+    uv add openai
+    ```
+
+    </CodeGroup>
+  </Step>
+  <Step title="Verify the server is running">
+    ```bash
+    curl http://localhost:8321/v1/models
+    ```
+
+    You should see a list of available models. If the server is not running, follow the [Quickstart](/getting-started/quickstart) to start it.
+  </Step>
+</Steps>
+
+## Chat completions
+
+The `/v1/chat/completions` endpoint is fully compatible with the OpenAI Chat Completions API.
+
+```python chat.py
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+
+# List available models
+models = client.models.list()
+for m in models.data:
+    print(f"  {m.id} ({m.object})")
+
+# Simple chat
+response = client.chat.completions.create(
+    model="llama3.2:3b",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Write a haiku about open source"},
+    ],
+)
+print(response.choices[0].message.content)
+```
+
+## Streaming
+
+Stream responses token by token for a more interactive experience:
+
+```python stream.py
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+
+stream = client.chat.completions.create(
+    model="llama3.2:3b",
+    messages=[{"role": "user", "content": "Explain RAG in 3 sentences"}],
+    stream=True,
+)
+
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
+print()
+```
+
+## Responses API with tool calling
+
+The Responses API provides server-side agentic orchestration. The model decides which tools to call, Llama Stack executes them, and feeds results back automatically — all in a single API call.
+
+```python tools.py
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+
+response = client.responses.create(
+    model="llama3.2:3b",
+    input="What is the weather like in San Francisco?",
+    tools=[{
+        "type": "function",
+        "name": "get_weather",
+        "description": "Get the current weather for a location",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "City name"},
+            },
+            "required": ["location"],
+        },
+    }],
+)
+
+# The model requests a tool call — inspect the output items
+for item in response.output:
+    print(item)
+```
+
+## RAG with vector stores
+
+Upload documents, create a vector store, and ask questions. Llama Stack handles chunking, embedding, and retrieval:
+
+```python rag.py
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+
+# Upload a document
+file = client.files.create(
+    file=open("my-document.pdf", "rb"),
+    purpose="assistants",
+)
+print(f"Uploaded: {file.id}")
+
+# Create a vector store and index the file
+vector_store = client.vector_stores.create(
+    name="my-docs",
+    file_ids=[file.id],
+)
+print(f"Vector store: {vector_store.id}")
+
+# Ask questions with file search
+response = client.responses.create(
+    model="llama3.2:3b",
+    input="What are the key points in this document?",
+    tools=[{
+        "type": "file_search",
+        "vector_store_ids": [vector_store.id],
+    }],
+)
+print(response.output_text)
+```
+
+## Multi-turn conversations
+
+Use `previous_response_id` to build multi-turn conversations without managing message history manually:
+
+```python conversation.py
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+
+# First turn
+r1 = client.responses.create(
+    model="llama3.2:3b",
+    input="My name is Alice and I'm building a RAG app",
+)
+print("Assistant:", r1.output_text)
+
+# Second turn — references the first response
+r2 = client.responses.create(
+    model="llama3.2:3b",
+    input="What did I say my name was?",
+    previous_response_id=r1.id,
+)
+print("Assistant:", r2.output_text)
+```
+
+## MCP tools
+
+Connect to any [Model Context Protocol](https://modelcontextprotocol.io/) server and use its tools directly from the Responses API:
+
+```python mcp.py
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+
+response = client.responses.create(
+    model="llama3.2:3b",
+    input="List files in the current directory",
+    tools=[{
+        "type": "mcp",
+        "server_label": "filesystem",
+        "server_url": "http://localhost:3000/sse",
+    }],
+)
+print(response.output_text)
+```
+
+## Switching providers
+
+The same client code works with any backend. Change the distribution config when starting the server and, if needed, update the model name in your requests:
+
+<Tabs>
+  <Tab title="Ollama (local)">
+    ```bash
+    uv run llama stack run starter
+    ```
+
+    ```python
+    response = client.responses.create(
+        model="llama3.2:3b",
+        input="What is Llama Stack?",
+    )
+    ```
+  </Tab>
+  <Tab title="OpenAI">
+    ```bash
+    export OPENAI_API_KEY=sk-xxx
+    uv run llama stack run starter
+    ```
+
+    ```python
+    response = client.responses.create(
+        model="openai/gpt-4o",
+        input="What is Llama Stack?",
+    )
+    ```
+
+    Your application code stays the same — only the model name changes.
+  </Tab>
+</Tabs>
+
+## Running as a library
+
+You can use Llama Stack without running a separate server by embedding it directly in your Python process:
+
+```python library.py
+from llama_stack.core.library_client import LlamaStackAsLibraryClient
+
+client = LlamaStackAsLibraryClient("starter")
+client.initialize()
+
+# Uses the same OpenAI-compatible interface
+response = client.responses.create(
+    model="llama3.2:3b",
+    input="Hello from library mode!",
+)
+print(response.output_text)
+```
+
+<Tip>
+  Library mode is useful for testing, notebooks, and applications where you want to avoid the overhead of a separate server process.
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Building applications" icon="code" href="/building-applications/rag">
+    RAG pipelines, agents, safety guardrails, and evaluations
+  </Card>
+  <Card title="Providers" icon="plug" href="/providers/overview">
+    All supported inference, vector store, and safety backends
+  </Card>
+  <Card title="Client libraries" icon="book" href="/getting-started/libraries">
+    Python SDK, TypeScript SDK, and curl examples
+  </Card>
+  <Card title="Deploying" icon="server" href="/deploying/overview">
+    Kubernetes, production setup, and scaling
+  </Card>
+</CardGroup>

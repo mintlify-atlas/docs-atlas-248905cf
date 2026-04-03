@@ -1,0 +1,323 @@
+---
+title: Other inference providers
+description: Overview of all other remote inference providers — Anthropic, Azure, Cerebras, Databricks, Fireworks, Gemini, Groq, NVIDIA, RunPod, SambaNova, Together, VertexAI, and WatsonX.
+---
+
+Llama Stack supports a broad set of remote inference providers beyond Ollama, OpenAI, vLLM, and Bedrock. All of them implement the same `Inference` API, so your application code stays the same regardless of which provider you use.
+
+## Provider summary
+
+| Provider type | Env vars required | Base URL / endpoint | Notes |
+|---|---|---|---|
+| `remote::anthropic` | `ANTHROPIC_API_KEY` | `https://api.anthropic.com` | Claude models |
+| `remote::azure` | `AZURE_API_KEY`, `AZURE_API_BASE`, `AZURE_API_VERSION` | Your Azure resource URL | Azure OpenAI Service |
+| `remote::cerebras` | `CEREBRAS_API_KEY` | `https://api.cerebras.ai/v1` | Cerebras Cloud |
+| `remote::databricks` | `DATABRICKS_HOST`, `DATABRICKS_TOKEN` | Your workspace serving endpoint | Databricks model serving |
+| `remote::fireworks` | `FIREWORKS_API_KEY` | `https://api.fireworks.ai/inference/v1` | Fireworks AI platform |
+| `remote::gemini` | `GEMINI_API_KEY` | Google AI API | Google Gemini models |
+| `remote::groq` | `GROQ_API_KEY` | `https://api.groq.com/openai/v1` | Ultra-fast Groq LPU |
+| `remote::nvidia` | `NVIDIA_API_KEY` | `https://integrate.api.nvidia.com/v1` | NVIDIA NIM |
+| `remote::runpod` | `RUNPOD_URL`, `RUNPOD_API_TOKEN` | Your RunPod endpoint URL | RunPod cloud GPU |
+| `remote::sambanova` | `SAMBANOVA_API_KEY` | `https://api.sambanova.ai/v1` | SambaNova dataflow |
+| `remote::together` | `TOGETHER_API_KEY` | `https://api.together.xyz/v1` | Together AI open-source models |
+| `remote::vertexai` | `VERTEX_AI_PROJECT` | Google Cloud Vertex AI | Gemini via GCP; uses ADC |
+| `remote::watsonx` | `WATSONX_API_KEY`, `WATSONX_PROJECT_ID` | `https://us-south.ml.cloud.ibm.com` | IBM WatsonX |
+
+---
+
+## Anthropic
+
+Provides access to Claude claude-opus-4, Claude Sonnet, and Claude Haiku models.
+
+```yaml
+providers:
+  inference:
+    - provider_id: anthropic
+      provider_type: remote::anthropic
+      config:
+        api_key: ${env.ANTHROPIC_API_KEY:=}
+```
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+---
+
+## Azure OpenAI
+
+Azure OpenAI Service hosts GPT-4o and other OpenAI models in your Azure tenant.
+
+```yaml
+providers:
+  inference:
+    - provider_id: azure
+      provider_type: remote::azure
+      config:
+        api_key: ${env.AZURE_API_KEY:=}
+        base_url: ${env.AZURE_API_BASE:=}
+        api_version: ${env.AZURE_API_VERSION:=}
+        api_type: ${env.AZURE_API_TYPE:=}
+```
+
+```bash
+export AZURE_API_KEY=...
+export AZURE_API_BASE=https://your-resource-name.openai.azure.com/openai/v1
+export AZURE_API_VERSION=2024-12-01-preview
+export AZURE_API_TYPE=azure
+```
+
+<Note>
+The `base_url` for Azure follows the pattern `https://<resource-name>.openai.azure.com/openai/v1`.
+</Note>
+
+---
+
+## Cerebras
+
+Cerebras Cloud provides fast inference on Cerebras hardware.
+
+```yaml
+providers:
+  inference:
+    - provider_id: cerebras
+      provider_type: remote::cerebras
+      config:
+        base_url: https://api.cerebras.ai/v1
+        api_key: ${env.CEREBRAS_API_KEY:=}
+```
+
+```bash
+export CEREBRAS_API_KEY=...
+```
+
+---
+
+## Databricks
+
+Databricks model serving provides inference through your Databricks workspace.
+
+```yaml
+providers:
+  inference:
+    - provider_id: databricks
+      provider_type: remote::databricks
+      config:
+        base_url: ${env.DATABRICKS_HOST:=}
+        api_token: ${env.DATABRICKS_TOKEN:=}
+```
+
+```bash
+export DATABRICKS_HOST=https://your-workspace.azuredatabricks.net/serving-endpoints
+export DATABRICKS_TOKEN=dapi...
+```
+
+---
+
+## Fireworks AI
+
+Fireworks AI hosts Llama and other open-source models with a fast API.
+
+```yaml
+providers:
+  inference:
+    - provider_id: fireworks
+      provider_type: remote::fireworks
+      config:
+        base_url: https://api.fireworks.ai/inference/v1
+        api_key: ${env.FIREWORKS_API_KEY:=}
+```
+
+```bash
+export FIREWORKS_API_KEY=fw_...
+```
+
+---
+
+## Google Gemini
+
+Access Gemini models directly through the Google AI API (not via GCP).
+
+```yaml
+providers:
+  inference:
+    - provider_id: gemini
+      provider_type: remote::gemini
+      config:
+        api_key: ${env.GEMINI_API_KEY:=}
+```
+
+```bash
+export GEMINI_API_KEY=AIza...
+```
+
+---
+
+## Groq
+
+Groq provides ultra-fast inference using its Language Processing Unit (LPU) technology.
+
+```yaml
+providers:
+  inference:
+    - provider_id: groq
+      provider_type: remote::groq
+      config:
+        base_url: https://api.groq.com/openai/v1
+        api_key: ${env.GROQ_API_KEY:=}
+```
+
+```bash
+export GROQ_API_KEY=gsk_...
+```
+
+---
+
+## NVIDIA NIM
+
+NVIDIA NIM provides optimized inference for NVIDIA-hosted models, including reranking models.
+
+```yaml
+providers:
+  inference:
+    - provider_id: nvidia
+      provider_type: remote::nvidia
+      config:
+        base_url: ${env.NVIDIA_BASE_URL:=https://integrate.api.nvidia.com/v1}
+        api_key: ${env.NVIDIA_API_KEY:=}
+```
+
+```bash
+export NVIDIA_API_KEY=nvapi-...
+```
+
+NVIDIA also provides reranking endpoints. The provider maps rerank model identifiers to their specific API URLs automatically.
+
+---
+
+## RunPod
+
+RunPod lets you deploy models on cloud GPU instances and serves them via a custom endpoint URL.
+
+```yaml
+providers:
+  inference:
+    - provider_id: runpod
+      provider_type: remote::runpod
+      config:
+        base_url: ${env.RUNPOD_URL:=}
+        api_token: ${env.RUNPOD_API_TOKEN:=}
+```
+
+```bash
+export RUNPOD_URL=https://api.runpod.ai/v2/<pod-id>/openai/v1
+export RUNPOD_API_TOKEN=...
+```
+
+---
+
+## SambaNova
+
+SambaNova runs models on its dataflow architecture for high-throughput inference.
+
+```yaml
+providers:
+  inference:
+    - provider_id: sambanova
+      provider_type: remote::sambanova
+      config:
+        base_url: https://api.sambanova.ai/v1
+        api_key: ${env.SAMBANOVA_API_KEY:=}
+```
+
+```bash
+export SAMBANOVA_API_KEY=...
+```
+
+---
+
+## Together AI
+
+Together AI hosts a large catalog of open-source models including Llama, Mistral, and Qwen.
+
+```yaml
+providers:
+  inference:
+    - provider_id: together
+      provider_type: remote::together
+      config:
+        base_url: https://api.together.xyz/v1
+        api_key: ${env.TOGETHER_API_KEY:=}
+```
+
+```bash
+export TOGETHER_API_KEY=...
+```
+
+---
+
+## Google Vertex AI
+
+Vertex AI accesses Gemini models through Google Cloud and uses Application Default Credentials (ADC) instead of API keys.
+
+```yaml
+providers:
+  inference:
+    - provider_id: vertexai
+      provider_type: remote::vertexai
+      config:
+        project: ${env.VERTEX_AI_PROJECT:=}
+        location: ${env.VERTEX_AI_LOCATION:=global}
+```
+
+```bash
+# Authenticate with GCP
+gcloud auth application-default login
+
+export VERTEX_AI_PROJECT=my-gcp-project
+export VERTEX_AI_LOCATION=us-central1  # optional, defaults to global
+```
+
+Available models: `vertex_ai/gemini-2.0-flash`, `vertex_ai/gemini-2.5-flash`, `vertex_ai/gemini-2.5-pro`.
+
+---
+
+## IBM WatsonX
+
+WatsonX provides enterprise AI models on IBM Cloud.
+
+```yaml
+providers:
+  inference:
+    - provider_id: watsonx
+      provider_type: remote::watsonx
+      config:
+        base_url: ${env.WATSONX_BASE_URL:=https://us-south.ml.cloud.ibm.com}
+        api_key: ${env.WATSONX_API_KEY:=}
+        project_id: ${env.WATSONX_PROJECT_ID:=}
+```
+
+```bash
+export WATSONX_API_KEY=...
+export WATSONX_PROJECT_ID=...
+```
+
+---
+
+## Python example (any provider)
+
+Once a provider is configured, the client code is identical regardless of which provider is active:
+
+```python
+from llama_stack_client import LlamaStackClient
+
+client = LlamaStackClient(base_url="http://localhost:8321")
+
+response = client.chat.completions.create(
+    model="<model-id-registered-with-your-provider>",
+    messages=[
+        {"role": "user", "content": "Summarize the benefits of using a pluggable provider architecture."},
+    ],
+)
+print(response.choices[0].message.content)
+```

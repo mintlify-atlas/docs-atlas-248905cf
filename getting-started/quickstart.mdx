@@ -1,0 +1,128 @@
+---
+title: Quickstart
+description: Get up and running with Llama Stack in under a minute.
+---
+
+Get Llama Stack running locally and make your first API call in three steps.
+
+## Prerequisites
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) before you begin. You will also need either [Ollama](https://ollama.com/download) for a fully local setup, or an OpenAI API key for a cloud-backed setup.
+
+## Start the server
+
+<Tabs>
+  <Tab title="Ollama (local)">
+    Pull a model with Ollama, then start the Llama Stack server:
+
+    ```bash
+    ollama pull llama3.2:3b
+    uvx --from 'llama-stack[starter]' llama stack run starter
+    ```
+  </Tab>
+  <Tab title="OpenAI">
+    Export your API key, then start the server:
+
+    ```bash
+    export OPENAI_API_KEY=sk-xxx
+    uvx --from 'llama-stack[starter]' llama stack run starter
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  The `uvx` command above is great for trying things out. For a persistent project, install into a dedicated environment instead:
+
+  ```bash
+  uv init my-ai-app && cd my-ai-app
+  uv add 'llama-stack[starter]' openai
+  uv run llama stack run starter
+  ```
+</Tip>
+
+The server starts at `http://localhost:8321`. You can connect to it with any OpenAI-compatible client.
+
+## Make your first call
+
+<Steps>
+  <Step title="Install the OpenAI SDK">
+    ```bash
+    pip install openai
+    ```
+  </Step>
+  <Step title="Run a completion">
+    Create `app.py` with the following content and run it:
+
+    ```python app.py
+    from openai import OpenAI
+
+    client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+
+    response = client.responses.create(
+        model="llama3.2:3b",
+        input="What is Llama Stack?",
+    )
+    print(response.output_text)
+    ```
+
+    ```bash
+    python app.py
+    ```
+
+    <Note>
+      The `api_key="fake"` value is intentional. Llama Stack does not require an API key by default — the field is required by the OpenAI SDK client but is not validated by the server.
+    </Note>
+  </Step>
+</Steps>
+
+## Add RAG in 10 lines
+
+Upload a file, create a vector store, and ask questions about it. Llama Stack handles chunking, embedding, and retrieval automatically.
+
+```python rag.py
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+
+# Upload a document
+file = client.files.create(
+    file=open("my-document.pdf", "rb"),
+    purpose="assistants",
+)
+
+# Create a vector store and index the file
+vector_store = client.vector_stores.create(
+    name="my-docs",
+    file_ids=[file.id],
+)
+
+# Ask questions with file search
+response = client.responses.create(
+    model="llama3.2:3b",
+    input="Summarize the key points",
+    tools=[{
+        "type": "file_search",
+        "vector_store_ids": [vector_store.id],
+    }],
+)
+print(response.output_text)
+```
+
+Same OpenAI SDK, local model, your own vector store.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Detailed tutorial" icon="graduation-cap" href="/getting-started/detailed-tutorial">
+    Deeper walkthrough of chat completions, streaming, tool calling, MCP, and more
+  </Card>
+  <Card title="Client libraries" icon="code" href="/getting-started/libraries">
+    Python and TypeScript SDKs, plus curl examples
+  </Card>
+  <Card title="Providers" icon="plug" href="/providers/overview">
+    Swap to vLLM, Bedrock, Azure, and 20+ other backends
+  </Card>
+  <Card title="Building applications" icon="rocket" href="/building-applications/rag">
+    RAG, agents, tool calling, safety, and evaluations
+  </Card>
+</CardGroup>

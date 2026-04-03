@@ -1,0 +1,195 @@
+---
+title: Safety providers
+description: Configure safety providers and shields for content moderation in Llama Stack.
+---
+
+Llama Stack's Safety API provides content moderation via **shields** — configurable policies that can screen inputs and outputs. It also exposes an OpenAI-compatible `/v1/moderations` endpoint.
+
+Safety providers come in two types:
+
+- **Inline** — run the safety model in-process (Llama Guard, Prompt Guard, Code Scanner)
+- **Remote** — delegate to an external service (AWS Bedrock Guardrails, NVIDIA Guardrails, SambaNova)
+
+## Provider summary
+
+| Provider type | Kind | Description |
+|---|---|---|
+| `inline::llama-guard` | Inline | Meta's Llama Guard model for content moderation and safety classification |
+| `inline::prompt-guard` | Inline | Prompt injection and jailbreak detection |
+| `inline::code-scanner` | Inline | Static analysis to detect unsafe code patterns |
+| `remote::bedrock` | Remote | AWS Bedrock Guardrails for enterprise content moderation |
+| `remote::nvidia` | Remote | NVIDIA NIM Guardrails |
+| `remote::sambanova` | Remote | SambaNova safety service |
+
+---
+
+## inline::llama-guard
+
+Llama Guard is Meta's safety classification model. It classifies inputs and outputs against a configurable set of harm categories.
+
+### Run config
+
+```yaml
+providers:
+  safety:
+    - provider_id: llama_guard
+      provider_type: inline::llama-guard
+      config:
+        excluded_categories: []
+```
+
+### Configuration reference
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `excluded_categories` | `[]` | List of harm category IDs to skip during evaluation |
+
+### Harm categories
+
+Llama Guard checks for categories such as violence, hate speech, sexual content, dangerous activities, and privacy violations. You can exclude specific categories by ID if they are not relevant to your use case.
+
+---
+
+## inline::prompt-guard
+
+Prompt Guard detects prompt injection and jailbreak attempts.
+
+### Run config
+
+```yaml
+providers:
+  safety:
+    - provider_id: prompt_guard
+      provider_type: inline::prompt-guard
+      config:
+        guard_type: injection
+```
+
+### Configuration reference
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `guard_type` | `injection` | Type of guard: `injection` detects prompt injection attacks |
+
+---
+
+## inline::code-scanner
+
+Code Scanner performs static analysis on generated code to detect unsafe patterns.
+
+### Run config
+
+```yaml
+providers:
+  safety:
+    - provider_id: code_scanner
+      provider_type: inline::code-scanner
+      config: {}
+```
+
+---
+
+## remote::bedrock
+
+AWS Bedrock Guardrails provides managed content moderation as a service.
+
+### Run config
+
+```yaml
+providers:
+  safety:
+    - provider_id: bedrock_guardrails
+      provider_type: remote::bedrock
+      config:
+        region_name: ${env.AWS_DEFAULT_REGION:=us-east-1}
+```
+
+AWS credentials are read from the standard environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`) or from the instance's IAM role.
+
+---
+
+## Registering and using a shield
+
+<Steps>
+  <Step title="Configure the safety provider in your run config">
+    Add the provider to the `safety` section of your distribution YAML as shown above.
+  </Step>
+  <Step title="Register a shield">
+    ```python
+    from llama_stack_client import LlamaStackClient
+
+    client = LlamaStackClient(base_url="http://localhost:8321")
+
+    # Register a shield backed by Llama Guard
+    shield = client.shields.register(
+        shield_id="content-safety",
+        provider_id="llama_guard",
+    )
+    print(shield.shield_id)
+    ```
+  </Step>
+  <Step title="Run a safety check">
+    ```python
+    # Check a message against the shield
+    response = client.safety.run_shield(
+        shield_id="content-safety",
+        messages=[
+            {"role": "user", "content": "How do I make a bomb?"},
+        ],
+    )
+
+    if response.violation:
+        print(f"Violation detected: {response.violation.user_message}")
+    else:
+        print("Content is safe.")
+    ```
+  </Step>
+  <Step title="Use shields in the Responses API">
+    ```python
+    # Shields can also be applied automatically in the Responses API
+    response = client.responses.create(
+        model="meta-llama/Llama-3.2-3B-Instruct",
+        input="Your prompt here",
+    )
+    ```
+  </Step>
+</Steps>
+
+## Using the OpenAI moderations endpoint
+
+Llama Stack exposes the OpenAI-compatible `/v1/moderations` endpoint. Point any OpenAI client at your Llama Stack server:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="none")
+
+result = client.moderations.create(
+    input="I want to hurt someone.",
+)
+print(result.results[0].flagged)
+```
+
+<Note>
+The `/v1/moderations` endpoint currently has partial coverage. Detailed per-category scores (harassment, hate, self-harm, etc.) are not yet populated in the response. See the [conformance report](/providers/openai-compatibility#conformance-summary) for current status.
+</Note>
+
+## Running multiple safety providers
+
+You can register multiple safety providers in a distribution and apply different shields to different use cases:
+
+```yaml
+providers:
+  safety:
+    - provider_id: llama_guard
+      provider_type: inline::llama-guard
+      config:
+        excluded_categories: []
+
+    - provider_id: prompt_guard
+      provider_type: inline::prompt-guard
+      config:
+        guard_type: injection
+```
+
+Then register distinct shields backed by each provider and apply them selectively in your application.

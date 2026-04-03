@@ -1,0 +1,288 @@
+---
+title: Vector IO providers
+description: Configure vector store providers for retrieval-augmented generation in Llama Stack.
+---
+
+Llama Stack's Vector IO API provides a unified interface for storing and querying document embeddings. It powers the file search tool, the `/v1/vector_stores` OpenAI-compatible endpoint, and direct `vector_io` API calls.
+
+Providers come in two types:
+
+- **Inline** — run in-process; no external service required. Best for development and single-node deployments.
+- **Remote** — connect to an external vector database service. Best for production and multi-node deployments.
+
+## Provider summary
+
+| Provider type | Kind | Search modes | Notes |
+|---|---|---|---|
+| `inline::sqlite-vec` | Inline | vector, keyword, hybrid | SQLite-based; disk-persistent; default for starter distributions |
+| `inline::faiss` | Inline | vector only | In-memory; fastest for read-heavy workloads |
+| `remote::chromadb` | Remote | vector, keyword, full-text, hybrid | ChromaDB server |
+| `remote::pgvector` | Remote | vector, keyword, hybrid | PostgreSQL with pgvector extension |
+| `remote::qdrant` | Remote | vector | Qdrant vector database |
+| `remote::weaviate` | Remote | vector, hybrid | Weaviate vector database |
+| `remote::milvus` | Remote | vector | Milvus / Zilliz Cloud |
+| `remote::elasticsearch` | Remote | vector, keyword, hybrid | Elasticsearch with dense_vector field |
+
+---
+
+## inline::sqlite-vec
+
+SQLite-Vec stores embeddings in an SQLite file on disk. It supports vector, keyword (FTS5), and hybrid search. This is the default vector IO provider in the starter distribution.
+
+### Run config
+
+```yaml
+providers:
+  vector_io:
+    - provider_id: sqlite_vec
+      provider_type: inline::sqlite-vec
+      config:
+        db_path: ${env.SQLITE_STORE_DIR:=~/.llama/dummy}/sqlite_vec.db
+        persistence:
+          namespace: vector_io::sqlite_vec
+          backend: kv_default
+```
+
+### Configuration reference
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `db_path` | — | Path to the SQLite database file |
+| `persistence.namespace` | — | Key prefix for the KV store |
+| `persistence.backend` | — | KV store backend name |
+
+### When to use sqlite-vec vs FAISS
+
+| Scenario | Recommended |
+|----------|-------------|
+| Frequent writes, OLTP workloads | sqlite-vec (incremental indexing) |
+| Large datasets that exceed RAM | sqlite-vec (disk-based) |
+| Read-heavy, in-memory workloads | FAISS (fastest reads) |
+| GPU-accelerated search | FAISS (GPU support) |
+
+---
+
+## inline::faiss
+
+FAISS (Facebook AI Similarity Search) stores embeddings in memory. It supports only vector similarity search but is faster for read-heavy workloads and supports GPU acceleration.
+
+### Run config
+
+```yaml
+providers:
+  vector_io:
+    - provider_id: faiss
+      provider_type: inline::faiss
+      config:
+        persistence:
+          namespace: vector_io::faiss
+          backend: kv_default
+```
+
+### Installation
+
+```bash
+pip install faiss-cpu
+# or for GPU support:
+pip install faiss-gpu
+```
+
+---
+
+## remote::chromadb
+
+ChromaDB is an open-source embedding database. Run it as a server and connect Llama Stack to it.
+
+### Start a ChromaDB server
+
+```bash
+pip install chromadb
+chroma run --host localhost --port 8000
+```
+
+### Run config
+
+```yaml
+providers:
+  vector_io:
+    - provider_id: chromadb
+      provider_type: remote::chromadb
+      config:
+        url: ${env.CHROMADB_URL}
+        persistence:
+          namespace: vector_io::chroma_remote
+          backend: kv_default
+```
+
+```bash
+export CHROMADB_URL=http://localhost:8000
+```
+
+---
+
+## remote::pgvector
+
+pgvector is a PostgreSQL extension that adds vector similarity search. It supports vector, keyword (full-text), and hybrid search.
+
+### Start a pgvector database
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    export PGVECTOR_DB=testvectordb
+    export PGVECTOR_USER=user
+    export PGVECTOR_PASSWORD=password
+
+    docker run -d \
+      --name pgvector \
+      -e POSTGRES_PASSWORD=$PGVECTOR_PASSWORD \
+      -e POSTGRES_USER=$PGVECTOR_USER \
+      -e POSTGRES_DB=$PGVECTOR_DB \
+      -p 5432:5432 \
+      pgvector/pgvector:0.8.1-pg18-trixie
+    ```
+  </Tab>
+  <Tab title="Podman">
+    ```bash
+    export PGVECTOR_DB=testvectordb
+    export PGVECTOR_USER=user
+    export PGVECTOR_PASSWORD=password
+
+    podman run -d \
+      --name pgvector \
+      -e POSTGRES_PASSWORD=$PGVECTOR_PASSWORD \
+      -e POSTGRES_USER=$PGVECTOR_USER \
+      -e POSTGRES_DB=$PGVECTOR_DB \
+      -p 5432:5432 \
+      pgvector/pgvector:0.8.1-pg18-trixie
+    ```
+  </Tab>
+</Tabs>
+
+### Run config
+
+```yaml
+providers:
+  vector_io:
+    - provider_id: pgvector
+      provider_type: remote::pgvector
+      config:
+        host: ${env.PGVECTOR_HOST:=localhost}
+        port: ${env.PGVECTOR_PORT:=5432}
+        db: ${env.PGVECTOR_DB}
+        user: ${env.PGVECTOR_USER}
+        password: ${env.PGVECTOR_PASSWORD}
+        distance_metric: COSINE
+        vector_index:
+          type: HNSW
+          m: 16
+          ef_construction: 64
+          ef_search: 40
+        persistence:
+          namespace: vector_io::pgvector
+          backend: kv_default
+```
+
+### Configuration reference
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `host` | `localhost` | PostgreSQL host |
+| `port` | `5432` | PostgreSQL port |
+| `db` | `postgres` | Database name |
+| `user` | `postgres` | Database user |
+| `password` | `mysecretpassword` | Database password |
+| `distance_metric` | `COSINE` | Distance metric: `COSINE`, `L2`, `L1`, or `INNER_PRODUCT` |
+| `vector_index.type` | `HNSW` | Index type: `HNSW` or `IVFFlat` |
+
+### Search modes
+
+pgvector supports three search modes:
+
+- **Vector** — cosine/L2 similarity search using the pgvector extension
+- **Keyword** — full-text search using PostgreSQL `tsvector` and `ts_rank`
+- **Hybrid** — combines both using Reciprocal Rank Fusion (RRF, default) or weighted scoring
+
+---
+
+## remote::qdrant
+
+Qdrant is a vector database optimized for filtering and payload-based search.
+
+### Run config
+
+```yaml
+providers:
+  vector_io:
+    - provider_id: qdrant
+      provider_type: remote::qdrant
+      config:
+        api_key: ${env.QDRANT_API_KEY:=}
+        url: ${env.QDRANT_URL:=}
+        port: 6333
+        persistence:
+          namespace: vector_io::qdrant_remote
+          backend: kv_default
+```
+
+---
+
+## remote::weaviate
+
+Weaviate is a vector database with built-in hybrid search support.
+
+### Run config
+
+```yaml
+providers:
+  vector_io:
+    - provider_id: weaviate
+      provider_type: remote::weaviate
+      config:
+        url: ${env.WEAVIATE_URL:=}
+        api_key: ${env.WEAVIATE_API_KEY:=}
+```
+
+---
+
+## Using the vector IO API
+
+Once configured, register and query a vector store using the standard API:
+
+```python
+from llama_stack_client import LlamaStackClient
+
+client = LlamaStackClient(base_url="http://localhost:8321")
+
+# Create a vector store
+store = client.vector_stores.create(name="my-docs")
+
+# Insert documents
+client.vector_stores.file_batches.upload_and_poll(
+    vector_store_id=store.id,
+    files=[open("document.pdf", "rb")],
+)
+
+# Search
+results = client.vector_stores.search(
+    vector_store_id=store.id,
+    query="What is retrieval-augmented generation?",
+)
+for result in results.data:
+    print(result.content)
+```
+
+### Query with search modes (direct API)
+
+```python
+# Hybrid search with RRF ranker
+chunks = client.vector_io.query_chunks(
+    vector_store_id="my-store",
+    query="machine learning basics",
+    params={
+        "mode": "hybrid",
+        "max_chunks": 5,
+        "ranker": {"type": "rrf", "impact_factor": 60.0},
+    },
+)
+```

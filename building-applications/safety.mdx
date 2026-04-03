@@ -1,0 +1,255 @@
+---
+title: Safety guardrails
+description: Apply content moderation and safety filtering to agent inputs and outputs using Llama Guard and the Llama Stack Shield system.
+---
+
+Llama Stack provides a Shield system for content filtering at multiple points in your application. Shields screen messages for harmful content and can be applied to user inputs, agent outputs, or both.
+
+## How shields work
+
+A shield is a named content-moderation policy backed by a provider (most commonly Llama Guard). You register a shield by ID, then reference that ID in your agent configuration or call the safety API directly.
+
+```text
+User input → [input shield] → Agent → LLM → [output shield] → Response
+```
+
+When a shield detects a violation it returns a `violation` object instead of letting the message through. You decide how to handle it — reject the request, log it, or return a safe fallback message.
+
+## Registering a shield
+
+```python
+from llama_stack_client import LlamaStackClient
+
+client = LlamaStackClient(base_url="http://localhost:8321")
+
+client.shields.register(
+    shield_id="content_safety",
+    provider_shield_id="llama-guard-basic",
+)
+```
+
+`provider_shield_id` maps to the safety model exposed by the configured safety provider. The most common value is `"llama-guard-basic"` for Llama Guard.
+
+## Running a manual shield check
+
+Call the safety API directly to check any message before processing it:
+
+```python
+response = client.safety.run_shield(
+    shield_id="content_safety",
+    messages=[{"role": "user", "content": "User message here"}],
+)
+
+if response.violation:
+    print(f"Safety violation: {response.violation.user_message}")
+else:
+    print("Content passed safety checks")
+```
+
+## Applying shields to agents
+
+Pass shield IDs to `input_shields` and `output_shields` when creating an agent. Llama Stack applies them automatically on every turn.
+
+<Tabs>
+  <Tab title="Input shields">
+    ```python
+    from llama_stack_client import Agent
+
+    agent = Agent(
+        client,
+        model="meta-llama/Llama-3.2-3B-Instruct",
+        instructions="You are a helpful assistant",
+        input_shields=["content_safety"],
+        tools=["builtin::websearch"],
+    )
+
+    session_id = agent.create_session("safe_session")
+
+    # User input is screened before the model sees it
+    response = agent.create_turn(
+        messages=[{"role": "user", "content": "Tell me about AI safety"}],
+        session_id=session_id,
+    )
+    ```
+  </Tab>
+  <Tab title="Output shields">
+    ```python
+    agent = Agent(
+        client,
+        model="meta-llama/Llama-3.2-3B-Instruct",
+        instructions="You are a helpful assistant",
+        output_shields=["content_safety"],
+        tools=["builtin::websearch"],
+    )
+
+    session_id = agent.create_session("safe_session")
+
+    # Agent responses are screened before being returned
+    response = agent.create_turn(
+        messages=[{"role": "user", "content": "Help me with my research"}],
+        session_id=session_id,
+    )
+    ```
+  </Tab>
+  <Tab title="Both">
+    ```python
+    agent = Agent(
+        client,
+        model="meta-llama/Llama-3.2-3B-Instruct",
+        instructions="You are a helpful assistant",
+        input_shields=["content_safety"],
+        output_shields=["content_safety"],
+        tools=["builtin::websearch"],
+    )
+
+    session_id = agent.create_session("fully_protected_session")
+
+    response = agent.create_turn(
+        messages=[{"role": "user", "content": "Research question here"}],
+        session_id=session_id,
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Available shield types
+
+### Llama Guard
+
+Llama Guard provides state-of-the-art content safety classification. Register it with the standard provider shield IDs:
+
+<CodeGroup>
+
+```python Basic
+client.shields.register(
+    shield_id="llama_guard_basic",
+    provider_shield_id="llama-guard-basic",
+)
+```
+
+```python Advanced (custom categories)
+client.shields.register(
+    shield_id="llama_guard_advanced",
+    provider_shield_id="llama-guard-advanced",
+    config={
+        "categories": [
+            "violence",
+            "hate_speech",
+            "sexual_content",
+            "self_harm",
+            "illegal_activity",
+        ],
+        "threshold": 0.8,
+    },
+)
+```
+
+</CodeGroup>
+
+### Custom shields
+
+Register custom safety shields for domain-specific policies:
+
+```python
+client.shields.register(
+    shield_id="financial_compliance",
+    provider_shield_id="custom-financial-shield",
+    config={
+        "detect_pii": True,
+        "financial_advice_warning": True,
+        "regulatory_compliance": "FINRA",
+    },
+)
+```
+
+## Handling violations
+
+```python
+response = client.safety.run_shield(
+    shield_id="content_safety",
+    messages=[{"role": "user", "content": "Potentially harmful content"}],
+)
+
+if response.violation:
+    violation = response.violation
+    print(f"Violation type: {violation.violation_type}")
+    print(f"Message to user: {violation.user_message}")
+    print(f"Metadata: {violation.metadata}")
+```
+
+For more detail, inspect the violation and respond accordingly:
+
+```python
+def handle_safety_response(safety_response, user_message):
+    if not safety_response.violation:
+        return {"safe": True}
+
+    violation = safety_response.violation
+
+    if violation.violation_type == "hate_speech":
+        user_feedback = (
+            "I can't engage with content that contains hate speech. "
+            "Let's keep our conversation respectful."
+        )
+    elif violation.violation_type == "violence":
+        user_feedback = (
+            "I can't provide information that could promote violence. "
+            "How else can I help you today?"
+        )
+    else:
+        user_feedback = "I can't help with that request. Please try something else."
+
+    return {"safe": False, "user_feedback": user_feedback}
+```
+
+## Industry-specific configurations
+
+<AccordionGroup>
+  <Accordion title="Healthcare (HIPAA)">
+    ```python
+    client.shields.register(
+        shield_id="hipaa_compliance",
+        provider_shield_id="healthcare-safety-shield",
+        config={
+            "detect_phi": True,
+            "medical_advice_warning": True,
+            "regulatory_framework": "HIPAA",
+        },
+    )
+    ```
+  </Accordion>
+  <Accordion title="Financial services (FINRA)">
+    ```python
+    client.shields.register(
+        shield_id="finra_compliance",
+        provider_shield_id="financial-safety-shield",
+        config={
+            "detect_financial_advice": True,
+            "investment_disclaimers": True,
+            "regulatory_framework": "FINRA",
+        },
+    )
+    ```
+  </Accordion>
+  <Accordion title="Education (COPPA)">
+    ```python
+    client.shields.register(
+        shield_id="coppa_compliance",
+        provider_shield_id="educational-safety-shield",
+        config={
+            "child_protection": True,
+            "educational_content_only": True,
+            "regulatory_framework": "COPPA",
+        },
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best practices
+
+- Apply both `input_shields` and `output_shields` for comprehensive coverage.
+- Log all violations with timestamps and message content for compliance audits.
+- Monitor false-positive rates and adjust the threshold if legitimate requests are being blocked.
+- Test your shield configuration with adversarial inputs before deploying to production.
+- Use the `X-LlamaStack-Provider-Data` header to pass provider credentials dynamically when needed.

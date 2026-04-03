@@ -1,0 +1,134 @@
+---
+title: AWS Bedrock inference provider
+description: Configure AWS Bedrock as an inference provider in Llama Stack.
+---
+
+The `remote::bedrock` provider connects Llama Stack to AWS Bedrock's OpenAI-compatible endpoint, giving you access to Llama, Titan, Claude, and other Bedrock-hosted models.
+
+## Prerequisites
+
+You need an AWS account with Bedrock access enabled for the models you want to use. Enable model access in the [AWS Bedrock console](https://console.aws.amazon.com/bedrock/home#/modelaccess).
+
+## AWS credentials setup
+
+Llama Stack uses your standard AWS credentials. Set them using any of the standard AWS methods:
+
+<Tabs>
+  <Tab title="Environment variables">
+    ```bash
+    export AWS_ACCESS_KEY_ID=AKIA...
+    export AWS_SECRET_ACCESS_KEY=...
+    export AWS_DEFAULT_REGION=us-east-2
+    ```
+  </Tab>
+  <Tab title="AWS CLI">
+    ```bash
+    aws configure
+    ```
+
+    This writes credentials to `~/.aws/credentials` and region to `~/.aws/config`.
+  </Tab>
+  <Tab title="IAM role (EC2 / ECS / Lambda)">
+    When running on AWS compute, attach an IAM role with `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` permissions. No environment variables are needed.
+  </Tab>
+  <Tab title="Bearer token (alternative)">
+    Bedrock also supports a bearer token:
+
+    ```bash
+    export AWS_BEARER_TOKEN_BEDROCK=<token>
+    ```
+  </Tab>
+</Tabs>
+
+### Minimum IAM policy
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": "arn:aws:bedrock:*::foundation-model/*"
+    }
+  ]
+}
+```
+
+## Run config
+
+```yaml
+providers:
+  inference:
+    - provider_id: bedrock
+      provider_type: remote::bedrock
+      config:
+        api_key: ${env.AWS_BEARER_TOKEN_BEDROCK:=}
+        region_name: ${env.AWS_DEFAULT_REGION:=us-east-2}
+```
+
+### Configuration reference
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `region_name` | `us-east-2` | AWS region for the Bedrock Runtime endpoint |
+| `api_key` | — | Optional bearer token (`AWS_BEARER_TOKEN_BEDROCK`). Standard AWS credentials are used if not set. |
+| `allowed_models` | `null` (all) | Restrict which models are registered |
+| `refresh_models` | `false` | Periodically refresh model list |
+
+## Supported model IDs
+
+Bedrock model IDs follow the pattern `<provider>.<model-name>`. Common Llama models:
+
+| Model ID | Description |
+|----------|-------------|
+| `meta.llama3-2-3b-instruct-v1:0` | Llama 3.2 3B Instruct |
+| `meta.llama3-2-11b-instruct-v1:0` | Llama 3.2 11B Instruct |
+| `meta.llama3-1-8b-instruct-v1:0` | Llama 3.1 8B Instruct |
+| `meta.llama3-1-70b-instruct-v1:0` | Llama 3.1 70B Instruct |
+| `meta.llama3-1-405b-instruct-v1:0` | Llama 3.1 405B Instruct |
+| `amazon.titan-text-express-v1` | Amazon Titan Express |
+
+<Note>
+Model availability varies by region. Check the [Bedrock model support by region](https://docs.aws.amazon.com/bedrock/latest/userguide/models-regions.html) page for the latest availability.
+</Note>
+
+## Python example
+
+```python
+from llama_stack_client import LlamaStackClient
+
+client = LlamaStackClient(base_url="http://localhost:8321")
+
+# List available models
+models = client.models.list()
+
+# Chat completion using a Bedrock-hosted Llama model
+response = client.chat.completions.create(
+    model="meta.llama3-2-3b-instruct-v1:0",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What AWS services support vector databases?"},
+    ],
+)
+print(response.choices[0].message.content)
+```
+
+### Streaming
+
+```python
+stream = client.chat.completions.create(
+    model="meta.llama3-1-8b-instruct-v1:0",
+    messages=[{"role": "user", "content": "Explain AWS IAM in simple terms."}],
+    stream=True,
+)
+for chunk in stream:
+    print(chunk.choices[0].delta.content or "", end="", flush=True)
+```
+
+<Warning>
+Bedrock charges per token. Make sure you understand the pricing for each model before running large workloads. See [AWS Bedrock pricing](https://aws.amazon.com/bedrock/pricing/).
+</Warning>

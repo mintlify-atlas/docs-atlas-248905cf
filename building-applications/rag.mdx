@@ -1,0 +1,273 @@
+---
+title: Retrieval-Augmented Generation (RAG)
+description: Build knowledge-enhanced AI applications that retrieve and reference external documents using Llama Stack.
+---
+
+RAG enables your applications to reference and recall information from external documents. Llama Stack exposes OpenAI-compatible vector store and files APIs so you can upload documents, store them as embeddings, and query them through the Responses API or the native client.
+
+## How it works
+
+Llama Stack RAG is built on three OpenAI-compatible APIs:
+
+| API | Purpose |
+|-----|---------|
+| **Files API** (`/v1/files`) | Upload and process documents |
+| **Vector Stores API** (`/v1/vector_stores`) | Store and search document embeddings |
+| **Responses API** (`/v1/responses`) | Agentic tool calling with `file_search` |
+
+## Quickstart
+
+<Steps>
+  <Step title="Start the server">
+    ```bash
+    llama stack list-deps starter | xargs -L1 uv pip install
+    llama stack run starter
+    ```
+  </Step>
+
+  <Step title="Upload a document">
+    ```python
+    import requests
+    from io import BytesIO
+    from llama_stack_client import LlamaStackClient
+
+    client = LlamaStackClient(base_url="http://localhost:8321")
+
+    url = "https://www.paulgraham.com/greatwork.html"
+    response = requests.get(url)
+    file_buffer = BytesIO(response.content)
+    file_buffer.name = "greatwork.html"
+
+    file = client.files.create(file=file_buffer, purpose="assistants")
+    ```
+  </Step>
+
+  <Step title="Create a vector store and attach the file">
+    ```python
+    vs = client.vector_stores.create(name="my_vector_db")
+    client.vector_stores.files.create(vector_store_id=vs.id, file_id=file.id)
+    ```
+  </Step>
+
+  <Step title="Query using the Agent class">
+    ```python
+    from llama_stack_client import Agent, AgentEventLogger
+
+    agent = Agent(
+        client,
+        model="ollama/llama3.2:3b",
+        instructions="You are a helpful assistant",
+        tools=[
+            {
+                "type": "file_search",
+                "vector_store_ids": [vs.id],
+            }
+        ],
+    )
+
+    response = agent.create_turn(
+        messages=[{"role": "user", "content": "How do you do great work?"}],
+        session_id=agent.create_session("my_session"),
+        stream=True,
+    )
+
+    for log in AgentEventLogger().log(response):
+        print(log, end="")
+    ```
+  </Step>
+</Steps>
+
+## Approaches
+
+Llama Stack supports three approaches for RAG depending on how much control you need.
+
+<Tabs>
+  <Tab title="Agent class (recommended)">
+    The `Agent` class is a high-level Python wrapper around the Responses API with automatic tool execution and session management. It is the recommended approach for multi-turn conversational RAG.
+
+    ```python
+    from llama_stack_client import Agent, AgentEventLogger, LlamaStackClient
+    import requests
+    from io import BytesIO
+
+    client = LlamaStackClient(base_url="http://localhost:8321")
+
+    # Create vector store and upload document
+    vs = client.vector_stores.create(name="my_vector_db")
+
+    url = "https://www.paulgraham.com/greatwork.html"
+    response = requests.get(url)
+    file_buffer = BytesIO(response.content)
+    file_buffer.name = "greatwork.html"
+
+    file = client.files.create(file=file_buffer, purpose="assistants")
+    client.vector_stores.files.create(vector_store_id=vs.id, file_id=file.id)
+
+    # Create agent — it decides when to search automatically
+    agent = Agent(
+        client,
+        model="ollama/llama3.2:3b",
+        instructions="You are a helpful assistant",
+        tools=[
+            {
+                "type": "file_search",
+                "vector_store_ids": [vs.id],
+            }
+        ],
+    )
+
+    response = agent.create_turn(
+        messages=[{"role": "user", "content": "How do you do great work?"}],
+        session_id=agent.create_session("my_session"),
+        stream=True,
+    )
+
+    for log in AgentEventLogger().log(response):
+        print(log, end="")
+    ```
+
+    **When to use:** Interactive applications, chatbots, multi-turn conversations.
+  </Tab>
+
+  <Tab title="Responses API">
+    The Responses API is the OpenAI-compatible server-side API. Use any OpenAI SDK — just point `base_url` at your Llama Stack server.
+
+    ```python
+    import io, requests
+    from openai import OpenAI
+
+    client = OpenAI(base_url="http://localhost:8321/v1/", api_key="none")
+
+    # Create vector store
+    vs = client.vector_stores.create()
+
+    url = "https://www.paulgraham.com/greatwork.html"
+    response = requests.get(url)
+    pseudo_file = io.BytesIO(str(response.content).encode("utf-8"))
+    file_id = client.files.create(
+        file=(url, pseudo_file, "text/html"), purpose="assistants"
+    ).id
+    client.vector_stores.files.create(vector_store_id=vs.id, file_id=file_id)
+
+    # Automatic tool calling
+    resp = client.responses.create(
+        model="gpt-4o",
+        input="How do you do great work?",
+        tools=[{"type": "file_search", "vector_store_ids": [vs.id]}],
+        include=["file_search_call.results"],
+    )
+
+    print(resp.output[-1].content[-1].text)
+    ```
+
+    **When to use:** Single-turn queries, OpenAI-compatible applications, stateless pipelines.
+  </Tab>
+
+  <Tab title="Chat Completions API">
+    The Chat Completions API lets you control retrieval explicitly. Search the vector store yourself and inject the context into the prompt.
+
+    ```python
+    import io, requests
+    from openai import OpenAI
+
+    client = OpenAI(base_url="http://localhost:8321/v1/", api_key="none")
+
+    # Create vector store and add documents
+    vs = client.vector_stores.create()
+    # ... upload and attach files ...
+
+    query = "How do you do great work?"
+
+    # Search the vector store explicitly
+    search_results = client.vector_stores.search(
+        vector_store_id=vs.id,
+        query=query,
+        limit=3,
+    )
+
+    # Build context from results
+    context = "\n\n".join(
+        [r.content for r in search_results.data if r.content]
+    )
+
+    # Construct the prompt manually
+    completion = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": "Use the provided context to answer questions.",
+            },
+            {
+                "role": "user",
+                "content": f"Context:\n{context}\n\nQuestion: {query}",
+            },
+        ],
+    )
+
+    print(completion.choices[0].message.content)
+    ```
+
+    **When to use:** Custom RAG pipelines, batch processing, fine-grained control over retrieval.
+  </Tab>
+</Tabs>
+
+## Vector store operations
+
+### Configure a default embedding model
+
+To call `client.vector_stores.create()` without specifying an embedding model every time, set a default in your `config.yaml`:
+
+```yaml
+vector_stores:
+  default_provider_id: faiss
+  default_embedding_model:
+    provider_id: sentence-transformers
+    model_id: nomic-ai/nomic-embed-text-v1.5
+```
+
+With this configuration, `client.vector_stores.create()` automatically uses the configured provider and embedding model.
+
+### Creating vector stores
+
+<CodeGroup>
+
+```python Automatic (uses defaults)
+vs = client.vector_stores.create()
+```
+
+```python Explicit provider and model
+vs = client.vector_stores.create(
+    extra_body={
+        "provider_id": "faiss",
+        "embedding_model": "sentence-transformers/nomic-ai/nomic-embed-text-v1.5",
+        "embedding_dimension": 768,
+    }
+)
+```
+
+</CodeGroup>
+
+### Managing files in a vector store
+
+```python
+# Attach a file to a vector store
+client.vector_stores.files.create(
+    vector_store_id=vs.id,
+    file_id=file.id,
+)
+
+# List files in a vector store
+files = client.vector_stores.files.list(vector_store_id=vs.id)
+
+# Search the vector store directly
+results = client.vector_stores.search(
+    vector_store_id=vs.id,
+    query="your search query",
+    limit=5,
+)
+```
+
+<Note>
+  Files must be fully processed before they can be searched. After calling `vector_stores.files.create()`, poll the file status until it reads `completed`.
+</Note>

@@ -1,24 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Llama Stack",
+  "projectType": "api-service",
+  "projectName": "Llama Stack",
+  "projectDescription": "An open-source, OpenAI-compatible agentic API server that runs anywhere — local, datacenter, or cloud — with a pluggable provider architecture supporting any model and infrastructure.",
   "theme": "luma",
-  "colors": {
-    "primary": "#1a3a4e",
-    "light": "#849ca6",
-    "dark": "#d0d7dc"
-  },
-  "favicon": "https://media.brand.dev/1249ef5f-a51c-4091-9257-39b635ea2c32.png",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/llamastack/llama-stack"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/llamastack/llama-stack"
-    }
-  },
+  "primaryColor": "#1a3a4e",
+  "lightColor": "#849ca6",
+  "darkColor": "#d0d7dc",
   "navigation": {
     "tabs": [
       {
@@ -94,5 +81,34 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "OpenAI-compatible API (chat completions, embeddings, responses, batches)",
+    "Pluggable provider architecture supporting 20+ inference backends",
+    "Server-side agentic orchestration with tool calling and MCP integration",
+    "Built-in RAG with vector stores and file search",
+    "Safety guardrails via Llama Guard and other safety providers",
+    "Evaluation framework for measuring model and application quality",
+    "Telemetry and observability built-in",
+    "Kubernetes and cloud deployment support",
+    "Distribution system for pre-configured deployments (starter, NVIDIA, Dell, etc.)",
+    "Recording/replay test infrastructure for deterministic CI"
+  ],
+  "publicApiSurface": [
+    "POST /v1/chat/completions",
+    "POST /v1/completions",
+    "POST /v1/embeddings",
+    "POST /v1/responses",
+    "GET /v1/models",
+    "POST /v1/vector_stores",
+    "POST /v1/files",
+    "POST /v1/batches",
+    "POST /v1/agents",
+    "POST /v1/safety/run_shield",
+    "GET /v1/inspect/providers",
+    "llama stack run",
+    "llama stack build",
+    "llama stack list-providers",
+    "llama stack list-apis"
+  ]
 }

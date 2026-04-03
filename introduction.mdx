@@ -1,0 +1,94 @@
+---
+title: "Llama Stack"
+description: "Open-source, OpenAI-compatible agentic API server. Any model, any infrastructure."
+---
+
+Llama Stack is a drop-in replacement for the OpenAI API that you can run anywhere — your laptop, your datacenter, or the cloud. Use any OpenAI-compatible client or agentic framework. Swap between Llama, GPT, Gemini, Mistral, or any model without changing your application code.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+response = client.chat.completions.create(
+    model="llama3.2:3b",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(response.choices[0].message.content)
+```
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/getting-started/quickstart">
+    Get Llama Stack running locally in under a minute
+  </Card>
+  <Card title="Detailed Tutorial" icon="graduation-cap" href="/getting-started/detailed-tutorial">
+    Deeper walkthrough of all APIs and capabilities
+  </Card>
+  <Card title="Building Applications" icon="code" href="/building-applications/rag">
+    RAG, agents, tool calling, safety, and evaluations
+  </Card>
+  <Card title="Providers" icon="plug" href="/providers/overview">
+    Connect to Ollama, vLLM, OpenAI, Bedrock, and 20+ more
+  </Card>
+</CardGroup>
+
+## What you get
+
+<CardGroup cols={2}>
+  <Card title="Chat Completions & Embeddings" icon="comments">
+    Standard `/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings` endpoints compatible with any OpenAI client
+  </Card>
+  <Card title="Responses API" icon="bolt">
+    Server-side agentic orchestration with tool calling, MCP server integration, and built-in file search in a single API call
+  </Card>
+  <Card title="Vector Stores & Files" icon="database">
+    `/v1/vector_stores` and `/v1/files` for managed document storage and search (RAG)
+  </Card>
+  <Card title="Safety Guardrails" icon="shield">
+    Built-in content moderation via Llama Guard and other safety providers
+  </Card>
+  <Card title="Evaluations" icon="chart-bar">
+    Measure and improve quality with a built-in evaluation framework
+  </Card>
+  <Card title="Any Infrastructure" icon="server">
+    Pluggable provider architecture — develop locally with Ollama, deploy to production with vLLM or a managed service
+  </Card>
+</CardGroup>
+
+## Get started in 3 steps
+
+<Steps>
+  <Step title="Install and start the server">
+    ```bash
+    uvx --from 'llama-stack[starter]' llama stack run starter
+    ```
+    The server starts at `http://localhost:8321`.
+  </Step>
+  <Step title="Connect with any OpenAI client">
+    ```python
+    from openai import OpenAI
+
+    client = OpenAI(base_url="http://localhost:8321/v1", api_key="fake")
+    response = client.responses.create(
+        model="llama3.2:3b",
+        input="What is Llama Stack?",
+    )
+    print(response.output_text)
+    ```
+  </Step>
+  <Step title="Swap providers as you scale">
+    The same API works whether your backend is Ollama, vLLM, OpenAI, AWS Bedrock, or dozens of other services. [See all providers](/providers/overview).
+  </Step>
+</Steps>
+
+## Client SDKs
+
+Connect from any language using the official SDKs or any OpenAI-compatible library.
+
+| Language | SDK | Install |
+|----------|-----|---------|
+| Python | [llama-stack-client-python](https://github.com/meta-llama/llama-stack-client-python) | `pip install llama-stack-client` |
+| TypeScript | [llama-stack-client-typescript](https://github.com/meta-llama/llama-stack-client-typescript) | `npm install llama-stack-client` |
+
+<Tip>
+  Since Llama Stack is OpenAI-compatible, you can also use the standard `openai` Python or Node.js SDK directly — just point `base_url` at your Llama Stack server.
+</Tip>

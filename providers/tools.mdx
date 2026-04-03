@@ -1,0 +1,265 @@
+---
+title: Tool runtime providers
+description: Configure tool runtime providers for file search, web search, Wolfram Alpha, and MCP integration in Llama Stack.
+---
+
+Llama Stack's Tool Runtime API provides built-in tool execution for the Responses API agentic loop. When a model decides to call a tool, Llama Stack executes it server-side and feeds the result back to the model — your client application does not need to handle tool calls manually.
+
+## Provider summary
+
+| Provider type | Kind | Description |
+|---|---|---|
+| `inline::file-search` | Inline | Document ingestion, chunking, and semantic search using vector stores |
+| `remote::brave-search` | Remote | Web search via Brave Search API |
+| `remote::tavily-search` | Remote | Web search via Tavily API |
+| `remote::bing-search` | Remote | Web search via Bing Search API |
+| `remote::wolfram-alpha` | Remote | Computational knowledge via Wolfram Alpha |
+| `remote::model-context-protocol` | Remote | Any MCP-compatible tool server |
+
+---
+
+## inline::file-search
+
+The file search provider enables retrieval-augmented generation (RAG) over uploaded files. It ingests documents, chunks them, embeds them into a vector store, and retrieves relevant chunks at query time.
+
+### Run config
+
+```yaml
+providers:
+  tool_runtime:
+    - provider_id: file_search
+      provider_type: inline::file-search
+      config: {}
+```
+
+The file search provider delegates storage to whichever `vector_io` provider is configured in your distribution.
+
+### Configuration options
+
+The provider accepts an optional `vector_stores_config` object to control chunking, retrieval, and prompt formatting. All fields have sensible defaults.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `vector_stores_config.default_embedding_model` | — | Default embedding model for new vector stores |
+| `vector_stores_config.file_ingestion_params.default_chunk_size_tokens` | `512` | Chunk size in tokens |
+| `vector_stores_config.file_ingestion_params.default_chunk_overlap_tokens` | `128` | Overlap between chunks |
+| `vector_stores_config.chunk_retrieval_params.max_tokens_in_context` | `4000` | Maximum tokens in the retrieved context |
+| `vector_stores_config.chunk_retrieval_params.default_reranker_strategy` | `rrf` | Reranker: `rrf`, `weighted`, or `normalized` |
+
+### Using file search in the Responses API
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="none")
+
+# Create a vector store and upload a file
+store = client.vector_stores.create(name="my-docs")
+client.vector_stores.file_batches.upload_and_poll(
+    vector_store_id=store.id,
+    files=[open("report.pdf", "rb")],
+)
+
+# Use file_search as a built-in tool in the Responses API
+response = client.responses.create(
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    input="What are the key findings in the report?",
+    tools=[{
+        "type": "file_search",
+        "vector_store_ids": [store.id],
+    }],
+)
+print(response.output_text)
+```
+
+---
+
+## Web search providers
+
+Llama Stack supports three web search providers. Only one is needed in a distribution — choose based on your API subscription.
+
+### remote::brave-search
+
+```yaml
+providers:
+  tool_runtime:
+    - provider_id: brave_search
+      provider_type: remote::brave-search
+      config:
+        api_key: ${env.BRAVE_SEARCH_API_KEY:=}
+        max_results: 3
+```
+
+```bash
+export BRAVE_SEARCH_API_KEY=BSA...
+```
+
+### remote::tavily-search
+
+```yaml
+providers:
+  tool_runtime:
+    - provider_id: tavily_search
+      provider_type: remote::tavily-search
+      config:
+        api_key: ${env.TAVILY_SEARCH_API_KEY:=}
+```
+
+```bash
+export TAVILY_SEARCH_API_KEY=tvly-...
+```
+
+### remote::bing-search
+
+```yaml
+providers:
+  tool_runtime:
+    - provider_id: bing_search
+      provider_type: remote::bing-search
+      config:
+        api_key: ${env.BING_SEARCH_API_KEY:=}
+```
+
+### Using web search in the Responses API
+
+```python
+response = client.responses.create(
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    input="What is the latest news about Llama Stack?",
+    tools=[{"type": "web_search"}],
+)
+print(response.output_text)
+```
+
+---
+
+## remote::wolfram-alpha
+
+Wolfram Alpha provides computational knowledge, mathematical calculation, and factual data.
+
+### Run config
+
+```yaml
+providers:
+  tool_runtime:
+    - provider_id: wolfram_alpha
+      provider_type: remote::wolfram-alpha
+      config:
+        api_key: ${env.WOLFRAM_ALPHA_API_KEY:=}
+```
+
+```bash
+export WOLFRAM_ALPHA_API_KEY=...
+```
+
+### Registration and use
+
+```python
+from llama_stack_client import LlamaStackClient
+
+client = LlamaStackClient(base_url="http://localhost:8321")
+
+# Register the Wolfram Alpha tool group
+client.tool_groups.register(
+    toolgroup_id="builtin::wolfram_alpha",
+    provider_id="wolfram_alpha",
+)
+
+# Use in an agent
+response = client.inference.chat_completion(
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    messages=[{"role": "user", "content": "What is the integral of x^2?"}],
+    tools=[{"tool_group_id": "builtin::wolfram_alpha"}],
+)
+```
+
+---
+
+## remote::model-context-protocol (MCP)
+
+The MCP provider lets you connect Llama Stack to any [Model Context Protocol](https://modelcontextprotocol.io/) server. MCP is an open standard for tools, resources, and prompts.
+
+### Run config
+
+MCP servers are registered dynamically rather than statically in the YAML config. The `remote::model-context-protocol` provider is registered as a provider type, and individual MCP servers are registered via the API.
+
+```yaml
+providers:
+  tool_runtime:
+    - provider_id: model_context_protocol
+      provider_type: remote::model-context-protocol
+      config: {}
+```
+
+### Registering an MCP server
+
+```python
+from llama_stack_client import LlamaStackClient
+
+client = LlamaStackClient(base_url="http://localhost:8321")
+
+# Register an MCP server as a tool group
+client.tool_groups.register(
+    toolgroup_id="mcp::my-server",
+    provider_id="model_context_protocol",
+    mcp_endpoint={"uri": "http://localhost:3000/sse"},
+)
+```
+
+### Using MCP tools in the Responses API
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="none")
+
+response = client.responses.create(
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    input="Use the available tools to answer my question.",
+    tools=[{
+        "type": "mcp",
+        "server_url": "http://localhost:3000/sse",
+        "server_label": "my-mcp-server",
+    }],
+)
+print(response.output_text)
+```
+
+<Note>
+MCP elicitations (where an MCP server requests additional information from the user mid-execution) and MCP sampling are not yet fully implemented.
+</Note>
+
+---
+
+## Combining multiple tools
+
+You can register multiple tool providers in a distribution and use them together in the Responses API:
+
+```yaml
+providers:
+  tool_runtime:
+    - provider_id: file_search
+      provider_type: inline::file-search
+      config: {}
+
+    - provider_id: brave_search
+      provider_type: remote::brave-search
+      config:
+        api_key: ${env.BRAVE_SEARCH_API_KEY:=}
+
+    - provider_id: wolfram_alpha
+      provider_type: remote::wolfram-alpha
+      config:
+        api_key: ${env.WOLFRAM_ALPHA_API_KEY:=}
+```
+
+```python
+response = client.responses.create(
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    input="Find recent research on RAG systems and compute their average publication year.",
+    tools=[
+        {"type": "web_search"},
+        {"type": "file_search", "vector_store_ids": [store.id]},
+    ],
+)
+```
